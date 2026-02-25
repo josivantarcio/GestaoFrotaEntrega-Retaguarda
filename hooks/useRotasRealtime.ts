@@ -14,27 +14,33 @@ export function useRotasRealtime({ dataFiltro, onEvento }: Options) {
   const [carregando, setCarregando] = useState(true);
   const rotasRef = useRef<Map<number, Rota>>(new Map());
 
+  const carregar = useCallback(async () => {
+    const supabase = getSupabaseClient();
+    const { data } = await supabase
+      .from("rotas")
+      .select("*")
+      .eq("data", dataFiltro)
+      .order("criado_em", { ascending: false });
+
+    if (data) {
+      const mapa = new Map<number, Rota>();
+      data.forEach((r: Rota) => mapa.set(r.id, r));
+      rotasRef.current = mapa;
+      setRotas([...mapa.values()]);
+    }
+  }, [dataFiltro]);
+
   // Carregamento inicial
   useEffect(() => {
-    async function carregar() {
-      setCarregando(true);
-      const supabase = getSupabaseClient();
-      const { data } = await supabase
-        .from("rotas")
-        .select("*")
-        .eq("data", dataFiltro)
-        .order("criado_em", { ascending: false });
+    setCarregando(true);
+    carregar().finally(() => setCarregando(false));
+  }, [carregar]);
 
-      if (data) {
-        const mapa = new Map<number, Rota>();
-        data.forEach((r: Rota) => mapa.set(r.id, r));
-        rotasRef.current = mapa;
-        setRotas([...mapa.values()]);
-      }
-      setCarregando(false);
-    }
-    carregar();
-  }, [dataFiltro]);
+  // Polling a cada 10s como fallback quando WebSocket não conecta
+  useEffect(() => {
+    const intervalo = setInterval(carregar, 10_000);
+    return () => clearInterval(intervalo);
+  }, [carregar]);
 
   // Realtime
   useEffect(() => {
