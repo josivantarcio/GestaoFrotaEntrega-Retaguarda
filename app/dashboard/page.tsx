@@ -1,4 +1,5 @@
 "use client";
+export const dynamic = "force-dynamic";
 import { useCallback, useMemo } from "react";
 import { Package, CheckCircle2, Truck, AlertTriangle } from "lucide-react";
 import { useRotasRealtime } from "@/hooks/useRotasRealtime";
