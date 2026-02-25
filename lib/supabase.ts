@@ -9,7 +9,10 @@ let _client: ReturnType<typeof createClient> | null = null;
 export function getSupabaseClient() {
   if (!_client) {
     _client = createClient(url, anonKey, {
-      realtime: { params: { eventsPerSecond: 10 } },
+      realtime: {
+        params: { eventsPerSecond: 10 },
+      },
+      db: { schema: "public" },
     });
   }
   return _client;

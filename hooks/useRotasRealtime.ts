@@ -67,8 +67,9 @@ export function useRotasRealtime({ dataFiltro, onEvento }: Options) {
           );
         }
       )
-      .subscribe((status: string) => {
+      .subscribe((status: string, err?: Error) => {
         setConectado(status === "SUBSCRIBED");
+        if (err) console.error("[Realtime]", status, err.message);
       });
 
     return () => {
