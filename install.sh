@@ -25,11 +25,21 @@ echo -e "${RESET}"
 
 # ── Diretório do script ───────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RETAGUARDA_DIR="$SCRIPT_DIR/logistica-retaguarda"
-TRAY_DIR="$SCRIPT_DIR/logistica-tray"
 
-[[ -d "$RETAGUARDA_DIR" ]] || erro "Pasta 'logistica-retaguarda' não encontrada em $SCRIPT_DIR"
-[[ -d "$TRAY_DIR" ]]       || erro "Pasta 'logistica-tray' não encontrada em $SCRIPT_DIR"
+# O script pode estar em logistica-retaguarda/ (caso normal do git)
+# ou na pasta pai junto com as duas pastas irmãs
+if [[ -f "$SCRIPT_DIR/docker-compose.yml" ]]; then
+  # Estamos dentro de logistica-retaguarda/
+  RETAGUARDA_DIR="$SCRIPT_DIR"
+  TRAY_DIR="$(dirname "$SCRIPT_DIR")/logistica-tray"
+else
+  # Estamos na pasta pai
+  RETAGUARDA_DIR="$SCRIPT_DIR/logistica-retaguarda"
+  TRAY_DIR="$SCRIPT_DIR/logistica-tray"
+fi
+
+[[ -d "$RETAGUARDA_DIR" ]] || erro "Pasta 'logistica-retaguarda' não encontrada."
+[[ -d "$TRAY_DIR" ]]       || erro "Pasta 'logistica-tray' não encontrada em $(dirname "$RETAGUARDA_DIR")"
 
 # ── Detectar distro ───────────────────────────────────────────────────────────
 detect_pkg_manager() {
@@ -105,7 +115,11 @@ CURRENT_KEY=$(grep 'ROUTELOG_API_KEY' "$COMPOSE_FILE" | sed 's/.*ROUTELOG_API_KE
 if [[ "$CURRENT_KEY" == "TROQUE_ESTA_CHAVE" ]]; then
   warn "A API Key padrão ainda está em uso."
   echo -n "  Digite uma nova API Key (mínimo 8 caracteres): "
-  read -r API_KEY
+  if [[ -t 0 ]] || [[ -e /dev/tty ]]; then
+    read -r API_KEY </dev/tty 2>/dev/null || read -r API_KEY
+  else
+    read -r API_KEY
+  fi
   [[ ${#API_KEY} -ge 8 ]] || erro "API Key deve ter pelo menos 8 caracteres."
   sed -i "s/ROUTELOG_API_KEY=TROQUE_ESTA_CHAVE/ROUTELOG_API_KEY=$API_KEY/" "$COMPOSE_FILE"
   ok "API Key atualizada."
@@ -131,9 +145,10 @@ ok "Retaguarda rodando em http://localhost:3000/dashboard"
 
 # ── 5. Habilitar Retaguarda no boot do sistema ────────────────────────────────
 # O Docker já tem restart:unless-stopped no compose.
-# Garantir que o Docker inicia com o SO:
-sudo systemctl enable docker
-ok "Docker configurado para iniciar com o sistema (Retaguarda sobe automaticamente)."
+# Garantir que o Docker inicia com o SO (silencioso se sem sudo):
+sudo systemctl enable docker 2>/dev/null && \
+  ok "Docker configurado para iniciar com o sistema (Retaguarda sobe automaticamente)." || \
+  warn "Não foi possível habilitar docker no boot automaticamente. Execute: sudo systemctl enable docker"
 
 # ── 6. Instalar e configurar o Tray ──────────────────────────────────────────
 info "Instalando dependências do Tray..."
@@ -148,10 +163,18 @@ echo -e "${BOLD}Configuração do Tray${RESET}"
 echo "────────────────────────────────────────────"
 echo "  URL padrão: http://localhost:3000"
 echo -n "  Usar URL padrão? [S/n]: "
-read -r resp
+if [[ -t 0 ]] || [[ -e /dev/tty ]]; then
+  read -r resp </dev/tty 2>/dev/null || read -r resp
+else
+  read -r resp
+fi
 if [[ "$resp" =~ ^[Nn]$ ]]; then
   echo -n "  Digite a URL da retaguarda (ex: http://192.168.1.100:3000): "
-  read -r SERVER_URL
+  if [[ -t 0 ]] || [[ -e /dev/tty ]]; then
+    read -r SERVER_URL </dev/tty 2>/dev/null || read -r SERVER_URL
+  else
+    read -r SERVER_URL
+  fi
   SERVER_URL="${SERVER_URL%/}"
 else
   SERVER_URL="http://localhost:3000"

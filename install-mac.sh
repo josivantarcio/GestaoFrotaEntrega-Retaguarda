@@ -29,11 +29,17 @@ echo -e "${RESET}"
 
 # ── Diretório do script ───────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RETAGUARDA_DIR="$SCRIPT_DIR/logistica-retaguarda"
-TRAY_DIR="$SCRIPT_DIR/logistica-tray"
 
-[[ -d "$RETAGUARDA_DIR" ]] || erro "Pasta 'logistica-retaguarda' não encontrada em $SCRIPT_DIR"
-[[ -d "$TRAY_DIR" ]]       || erro "Pasta 'logistica-tray' não encontrada em $SCRIPT_DIR"
+if [[ -f "$SCRIPT_DIR/docker-compose.yml" ]]; then
+  RETAGUARDA_DIR="$SCRIPT_DIR"
+  TRAY_DIR="$(dirname "$SCRIPT_DIR")/logistica-tray"
+else
+  RETAGUARDA_DIR="$SCRIPT_DIR/logistica-retaguarda"
+  TRAY_DIR="$SCRIPT_DIR/logistica-tray"
+fi
+
+[[ -d "$RETAGUARDA_DIR" ]] || erro "Pasta 'logistica-retaguarda' não encontrada."
+[[ -d "$TRAY_DIR" ]]       || erro "Pasta 'logistica-tray' não encontrada em $(dirname "$RETAGUARDA_DIR")"
 
 # ── 1. Xcode Command Line Tools ───────────────────────────────────────────────
 info "Verificando Xcode Command Line Tools..."

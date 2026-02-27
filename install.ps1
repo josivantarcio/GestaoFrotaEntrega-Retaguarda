@@ -43,12 +43,19 @@ if (-not $isAdmin) {
 }
 
 # ── Diretórios ────────────────────────────────────────────────────────────────
-$ScriptDir      = Split-Path -Parent $MyInvocation.MyCommand.Path
-$RetaguardaDir  = Join-Path $ScriptDir "logistica-retaguarda"
-$TrayDir        = Join-Path $ScriptDir "logistica-tray"
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-if (-not (Test-Path $RetaguardaDir)) { Erro "Pasta 'logistica-retaguarda' não encontrada em $ScriptDir" }
-if (-not (Test-Path $TrayDir))       { Erro "Pasta 'logistica-tray' não encontrada em $ScriptDir" }
+# O script pode estar dentro de logistica-retaguarda/ ou na pasta pai
+if (Test-Path (Join-Path $ScriptDir "docker-compose.yml")) {
+  $RetaguardaDir = $ScriptDir
+  $TrayDir       = Join-Path (Split-Path -Parent $ScriptDir) "logistica-tray"
+} else {
+  $RetaguardaDir = Join-Path $ScriptDir "logistica-retaguarda"
+  $TrayDir       = Join-Path $ScriptDir "logistica-tray"
+}
+
+if (-not (Test-Path $RetaguardaDir)) { Erro "Pasta 'logistica-retaguarda' não encontrada." }
+if (-not (Test-Path $TrayDir))       { Erro "Pasta 'logistica-tray' não encontrada em $(Split-Path -Parent $RetaguardaDir)" }
 
 # ── Função auxiliar: verificar comando ───────────────────────────────────────
 function CommandExists { param($cmd) return [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
