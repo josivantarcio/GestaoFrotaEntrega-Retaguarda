@@ -15,7 +15,7 @@ Painel web para acompanhamento em tempo real das operações de entrega. Recebe 
 - Autenticação por API Key no header `x-api-key`
 - Banco de dados SQLite local (sem dependência de serviço externo)
 - Deploy via Docker com volume persistente
-- Scripts de inicialização para Linux e Windows
+- Scripts de instalação completa para Linux, macOS e Windows (Docker + Tray + auto-start)
 
 ---
 
@@ -120,7 +120,47 @@ ROUTELOG_API_KEY=sua-chave-secreta-aqui
 
 ---
 
-## Scripts de inicialização rápida
+## Instalação completa (Retaguarda + Tray)
+
+Os scripts abaixo instalam tudo automaticamente: Docker, Node.js, sobem a Retaguarda e configuram o [RouteLog Tray](https://github.com/josivantarcio/GestaoFrotaEntrega-Tray) com auto-start nativo do SO.
+
+> **Pré-requisito:** ter as pastas `logistica-retaguarda` e `logistica-tray` lado a lado no mesmo diretório pai.
+
+**Linux** (Ubuntu, Debian, Fedora, Arch):
+```bash
+chmod +x install.sh
+./install.sh
+```
+Auto-start via `.desktop` em `~/.config/autostart` + `systemctl enable docker`.
+
+**macOS** (Monterey 12+):
+```bash
+chmod +x install-mac.sh
+./install-mac.sh
+```
+Auto-start via **LaunchAgent** em `~/Library/LaunchAgents`.
+
+**Windows** (10/11):
+```
+# Double-click em install.bat  (pede permissão de Admin automaticamente)
+```
+Ou via PowerShell Admin:
+```powershell
+powershell -ExecutionPolicy Bypass -File install.ps1
+```
+Auto-start via **Task Scheduler** no logon do usuário.
+
+O que cada script faz:
+1. Instala Docker (se necessário)
+2. Instala Node.js (se necessário)
+3. Solicita a API Key (se ainda for o valor padrão)
+4. Sobe a Retaguarda em Docker (`docker compose up -d --build`)
+5. Compila e inicia o Tray
+6. Configura ambos para iniciar automaticamente após reboot
+
+---
+
+## Scripts de inicialização rápida (somente Retaguarda)
 
 **Linux:**
 ```bash
