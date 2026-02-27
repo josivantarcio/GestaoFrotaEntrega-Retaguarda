@@ -1,0 +1,14 @@
+services:
+  routelog:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - routelog-data:/data
+    environment:
+      - DATA_DIR=/data
+      - ROUTELOG_API_KEY=TROQUE_ESTA_CHAVE
+
+volumes:
+  routelog-data:

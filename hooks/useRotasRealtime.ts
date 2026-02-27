@@ -1,6 +1,5 @@
 "use client";
 import { useEffect, useRef, useState, useCallback } from "react";
-import { getSupabaseClient } from "@/lib/supabase";
 import type { Rota, ItemRota, Ocorrencia, EventoNotificacao } from "@/lib/types";
 
 interface Options {
@@ -13,22 +12,30 @@ export function useRotasRealtime({ dataFiltro, onEvento }: Options) {
   const [conectado, setConectado] = useState(false);
   const [carregando, setCarregando] = useState(true);
   const rotasRef = useRef<Map<number, Rota>>(new Map());
+  const onEventoRef = useRef(onEvento);
+  onEventoRef.current = onEvento;
+
+  const setRotasOrdenadas = useCallback((mapa: Map<number, Rota>) => {
+    setRotas(
+      [...mapa.values()].sort(
+        (a, b) => new Date(b.criado_em).getTime() - new Date(a.criado_em).getTime()
+      )
+    );
+  }, []);
 
   const carregar = useCallback(async () => {
-    const supabase = getSupabaseClient();
-    const { data } = await supabase
-      .from("rotas")
-      .select("*")
-      .eq("data", dataFiltro)
-      .order("criado_em", { ascending: false });
-
-    if (data) {
+    try {
+      const res = await fetch(`/api/sync/rotas?data=${dataFiltro}`);
+      if (!res.ok) return;
+      const data: Rota[] = await res.json();
       const mapa = new Map<number, Rota>();
-      data.forEach((r: Rota) => mapa.set(r.id, r));
+      data.forEach((r) => mapa.set(r.id, r));
       rotasRef.current = mapa;
-      setRotas([...mapa.values()]);
+      setRotasOrdenadas(mapa);
+    } catch {
+      // silently ignore network errors
     }
-  }, [dataFiltro]);
+  }, [dataFiltro, setRotasOrdenadas]);
 
   // Carregamento inicial
   useEffect(() => {
@@ -36,52 +43,69 @@ export function useRotasRealtime({ dataFiltro, onEvento }: Options) {
     carregar().finally(() => setCarregando(false));
   }, [carregar]);
 
-  // Polling a cada 10s como fallback quando WebSocket não conecta
+  // Polling a cada 15s como fallback quando SSE não conecta
   useEffect(() => {
-    const intervalo = setInterval(carregar, 10_000);
+    const intervalo = setInterval(carregar, 15_000);
     return () => clearInterval(intervalo);
   }, [carregar]);
 
-  // Realtime
+  // SSE
   useEffect(() => {
-    const supabase = getSupabaseClient();
-    const channel = supabase
-      .channel(`rotas-dia-${dataFiltro}`)
-      .on(
-        "postgres_changes" as any,
-        { event: "*", schema: "public", table: "rotas" },
-        (payload: any) => {
-          const nova = payload.new as Rota;
-          // Filtra apenas rotas do dia monitorado
+    let es: EventSource | null = null;
+    let reconectarTimeout: ReturnType<typeof setTimeout> | null = null;
+    let ativo = true;
+
+    function conectar() {
+      if (!ativo) return;
+      es = new EventSource("/api/events");
+
+      es.onopen = () => {
+        if (ativo) setConectado(true);
+      };
+
+      es.onerror = () => {
+        setConectado(false);
+        es?.close();
+        if (ativo) {
+          reconectarTimeout = setTimeout(conectar, 7_000);
+        }
+      };
+
+      es.onmessage = (e: MessageEvent) => {
+        try {
+          const evento = JSON.parse(e.data) as { tipo: string; tabela: string; payload: unknown };
+          if (evento.tipo !== "rota_upserted" || evento.tabela !== "rotas") return;
+
+          const nova = evento.payload as Rota;
           if (nova.data !== dataFiltro) return;
 
           const antiga = rotasRef.current.get(nova.id);
 
           if (!antiga) {
-            onEvento({ tipo: "rota_iniciada", rota: nova });
+            onEventoRef.current({ tipo: "rota_iniciada", rota: nova });
           } else if (nova.status === "concluida" && antiga.status !== "concluida") {
-            onEvento({ tipo: "rota_encerrada", rota: nova });
+            onEventoRef.current({ tipo: "rota_encerrada", rota: nova });
           } else {
-            detectarMudancasItens(antiga, nova, onEvento);
+            detectarMudancasItens(antiga, nova, onEventoRef.current);
           }
 
           rotasRef.current.set(nova.id, nova);
-          setRotas(
-            [...rotasRef.current.values()].sort(
-              (a, b) => new Date(b.criado_em).getTime() - new Date(a.criado_em).getTime()
-            )
-          );
+          setRotasOrdenadas(rotasRef.current);
+        } catch {
+          // invalid JSON — ignore
         }
-      )
-      .subscribe((status: string, err?: Error) => {
-        setConectado(status === "SUBSCRIBED");
-        if (err) console.error("[Realtime]", status, err.message);
-      });
+      };
+    }
+
+    conectar();
 
     return () => {
-      supabase.removeChannel(channel);
+      ativo = false;
+      if (reconectarTimeout) clearTimeout(reconectarTimeout);
+      es?.close();
+      setConectado(false);
     };
-  }, [dataFiltro, onEvento]);
+  }, [dataFiltro, setRotasOrdenadas]);
 
   return { rotas, conectado, carregando };
 }

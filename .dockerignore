@@ -1,0 +1,9 @@
+node_modules
+.next
+data
+.env*
+.git
+*.log
+README.md
+start.bat
+start.sh
