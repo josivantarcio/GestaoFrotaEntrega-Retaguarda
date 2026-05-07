@@ -114,3 +114,25 @@ ALTER PUBLICATION supabase_realtime ADD TABLE rotas;
 ALTER PUBLICATION supabase_realtime ADD TABLE cidades;
 ALTER PUBLICATION supabase_realtime ADD TABLE entregadores;
 ALTER PUBLICATION supabase_realtime ADD TABLE veiculos;
+
+-- ── Rastreamento em tempo real ────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS localizacoes (
+  id         BIGSERIAL PRIMARY KEY,
+  rota_id    BIGINT NOT NULL REFERENCES rotas(id) ON DELETE CASCADE,
+  lat        DOUBLE PRECISION NOT NULL,
+  lng        DOUBLE PRECISION NOT NULL,
+  velocidade REAL,
+  criado_em  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_localizacoes_rota_id  ON localizacoes(rota_id);
+CREATE INDEX IF NOT EXISTS idx_localizacoes_criado_em ON localizacoes(rota_id, criado_em DESC);
+
+ALTER TABLE localizacoes ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "leitura publica" ON localizacoes FOR SELECT USING (true);
+CREATE POLICY "escrita service role" ON localizacoes
+  FOR ALL USING (auth.role() = 'service_role');
+
+ALTER PUBLICATION supabase_realtime ADD TABLE localizacoes;
