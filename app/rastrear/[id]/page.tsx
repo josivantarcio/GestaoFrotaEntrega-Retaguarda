@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { use, useEffect, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -20,8 +20,9 @@ interface Localizacao {
   status?: string;
 }
 
-export default function RastrearPage({ params }: { params: { id: string } }) {
-  const rotaId = Number(params.id);
+export default function RastrearPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
+  const rotaId = Number(id);
   const [posicao, setPosicao] = useState<Localizacao | null>(null);
   const [encerrada, setEncerrada] = useState(false);
   const [ultimaAtualizacao, setUltimaAtualizacao] = useState<Date | null>(null);
