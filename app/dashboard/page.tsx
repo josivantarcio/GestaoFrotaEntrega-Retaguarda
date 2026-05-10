@@ -112,7 +112,7 @@ export default function DashboardPage() {
 
       {/* Rodapé */}
       <footer className="text-center py-4 text-xs text-gray-300">
-        RouteLog · Desenvolvido por Josevan Oliveira
+        RotaFácil · Desenvolvido por Josevan Oliveira
       </footer>
     </div>
   );

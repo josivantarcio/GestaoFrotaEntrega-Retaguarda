@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Retaguarda — RouteLog",
+  title: "RotaFácil — Retaguarda",
   description: "Painel de monitoramento de rotas em tempo real",
 };
 
