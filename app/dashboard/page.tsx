@@ -45,7 +45,7 @@ export default function DashboardPage() {
       {/* KPIs */}
       <div className="px-5 py-4 grid grid-cols-2 md:grid-cols-4 gap-3">
         <KpiCard
-          icone={<Truck size={20} className="text-[#ee4d2d]" />}
+          icone={<Truck size={20} className="text-[#0d47a1]" />}
           titulo="Em Andamento"
           valor={emAndamento.length}
           sub={`${concluidas.length} concluída${concluidas.length !== 1 ? "s" : ""}`}
@@ -76,7 +76,7 @@ export default function DashboardPage() {
       <main className="flex-1 px-5 pb-8">
         {carregando ? (
           <div className="flex items-center justify-center py-24">
-            <div className="w-8 h-8 border-3 border-[#ee4d2d] border-t-transparent rounded-full animate-spin" />
+            <div className="w-8 h-8 border-3 border-[#0d47a1] border-t-transparent rounded-full animate-spin" />
           </div>
         ) : rotas.length === 0 ? (
           <div className="text-center py-24">

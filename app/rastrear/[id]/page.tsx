@@ -238,7 +238,7 @@ export default function RastrearPage({ params }: { params: Promise<{ id: string 
 
         {/* Linha superior: info + status */}
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 10, background: "linear-gradient(135deg, #ee4d2d, #ff6b47)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: "linear-gradient(135deg, #0d47a1, #1565c0)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
             <IconeTruck size={18} color="#fff" />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -276,7 +276,7 @@ export default function RastrearPage({ params }: { params: Promise<{ id: string 
             {/* trilho */}
             <div style={{ position: "absolute", left: 0, right: 0, height: 3, backgroundColor: "rgba(255,255,255,0.08)", borderRadius: 2 }}>
               {/* progresso preenchido */}
-              <div style={{ height: "100%", width: `${carrinhoPos}%`, background: "linear-gradient(90deg, #ee4d2d, #ff6b47)", borderRadius: 2, transition: "width 1.2s cubic-bezier(0.4,0,0.2,1)" }} />
+              <div style={{ height: "100%", width: `${carrinhoPos}%`, background: "linear-gradient(90deg, #0d47a1, #1565c0)", borderRadius: 2, transition: "width 1.2s cubic-bezier(0.4,0,0.2,1)" }} />
             </div>
 
             {/* marcadores de cidades */}
@@ -292,7 +292,7 @@ export default function RastrearPage({ params }: { params: Promise<{ id: string 
               transition: "left 1.2s cubic-bezier(0.4,0,0.2,1)",
               display: "flex", alignItems: "center", justifyContent: "center",
               width: 28, height: 28,
-              background: "linear-gradient(135deg, #ee4d2d, #ff6b47)",
+              background: "linear-gradient(135deg, #0d47a1, #1565c0)",
               borderRadius: 8,
               boxShadow: "0 2px 8px rgba(238,77,45,0.5)",
             }}>

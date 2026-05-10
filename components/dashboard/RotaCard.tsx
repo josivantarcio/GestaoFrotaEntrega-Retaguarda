@@ -68,7 +68,7 @@ export function RotaCard({ rota, concluida = false }: Props) {
         {/* Barra de progresso */}
         <div className="mt-3 h-1.5 bg-gray-100 rounded-full overflow-hidden">
           <div
-            className={`h-full rounded-full transition-all duration-700 ${concluida ? "bg-green-500" : "bg-[#ee4d2d]"}`}
+            className={`h-full rounded-full transition-all duration-700 ${concluida ? "bg-green-500" : "bg-[#0d47a1]"}`}
             style={{ width: `${progresso}%` }}
           />
         </div>
