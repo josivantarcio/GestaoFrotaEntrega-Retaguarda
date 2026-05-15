@@ -53,6 +53,25 @@ export interface Rota {
   atualizado_em: string;
 }
 
+export interface Jornada {
+  id: number;
+  data: string;
+  hora_inicio: string;
+  hora_fim: string | null;
+  motorista: string | null;
+  criado_em: string;
+}
+
+export interface Descarga {
+  id: number;
+  data: string;
+  hora_inicio: string;
+  hora_fim: string | null;
+  motoristas_ids: number[];
+  observacao: string | null;
+  criado_em: string;
+}
+
 // Tipos de evento para notificações
 export type EventoNotificacao =
   | { tipo: "rota_iniciada"; rota: Rota }

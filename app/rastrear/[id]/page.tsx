@@ -228,7 +228,18 @@ export default function RastrearPage({ params }: { params: Promise<{ id: string 
   const totalCidades = eventos.find(e => e.tipo === "rota_iniciada")?.payload?.totalCidades ?? 0;
   const motorista    = posicao?.motorista ?? eventos.find(e => e.tipo === "rota_iniciada")?.payload?.motorista ?? "";
   const placa        = posicao?.veiculo_placa ?? eventos.find(e => e.tipo === "rota_iniciada")?.payload?.veiculoPlaca ?? "";
-  const mapsUrl      = posicao ? `https://maps.google.com/maps?q=${posicao.lat},${posicao.lng}&z=15&output=embed` : null;
+  const mapsUrl = posicao
+    ? `https://maps.google.com/maps?q=${posicao.lat},${posicao.lng}&z=15&output=embed`
+    : null;
+  const mapsUrlRef = useRef<string | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  // Atualiza o src do iframe sem recriá-lo (evita piscar a cada nova posição)
+  useEffect(() => {
+    if (!mapsUrl || mapsUrl === mapsUrlRef.current) return;
+    mapsUrlRef.current = mapsUrl;
+    if (iframeRef.current) iframeRef.current.src = mapsUrl;
+  }, [mapsUrl]);
 
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", fontFamily: "'Inter', 'Segoe UI', sans-serif", overflow: "hidden", backgroundColor: "#0f172a" }}>
@@ -353,15 +364,16 @@ export default function RastrearPage({ params }: { params: Promise<{ id: string 
 
       {/* ── Mapa ── */}
       <div style={{ flex: 1, position: "relative", backgroundColor: "#1e293b" }}>
-        {mapsUrl ? (
-          <iframe
-            key={`${posicao?.lat}-${posicao?.lng}`}
-            src={mapsUrl} width="100%" height="100%"
-            style={{ border: "none", display: "block" }}
-            allowFullScreen loading="lazy"
-            referrerPolicy="no-referrer-when-downgrade"
-          />
-        ) : (
+        {/* iframe sempre montado — src atualizado via ref para não recarregar */}
+        <iframe
+          ref={iframeRef}
+          src={mapsUrl ?? undefined}
+          width="100%" height="100%"
+          style={{ border: "none", display: mapsUrl ? "block" : "none" }}
+          allowFullScreen loading="lazy"
+          referrerPolicy="no-referrer-when-downgrade"
+        />
+        {!mapsUrl && (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 12 }}>
             <IconeMapPin size={40} color="#334155" />
             <div style={{ color: "#475569", fontSize: 13, textAlign: "center", lineHeight: 1.6, padding: "0 32px" }}>

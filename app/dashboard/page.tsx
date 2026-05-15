@@ -1,12 +1,13 @@
 "use client";
 export const dynamic = "force-dynamic";
 import { useCallback, useMemo } from "react";
-import { Package, CheckCircle2, Truck, AlertTriangle } from "lucide-react";
+import { Package, CheckCircle2, Truck, AlertTriangle, Clock, PackageOpen } from "lucide-react";
 import { useRotasRealtime } from "@/hooks/useRotasRealtime";
+import { useJornadasDescargasRealtime } from "@/hooks/useJornadasDescargasRealtime";
 import { useNotificacoes } from "@/hooks/useNotificacoes";
 import { TopBar } from "@/components/layout/TopBar";
 import { RotaCard } from "@/components/dashboard/RotaCard";
-import type { EventoNotificacao } from "@/lib/types";
+import type { EventoNotificacao, Jornada, Descarga } from "@/lib/types";
 
 function hoje() {
   const d = new Date();
@@ -21,10 +22,14 @@ export default function DashboardPage() {
     [dispararNotificacao]
   );
 
+  const dataHoje = hoje();
+
   const { rotas, conectado, carregando } = useRotasRealtime({
-    dataFiltro: hoje(),
+    dataFiltro: dataHoje,
     onEvento: handleEvento,
   });
+
+  const { jornadas, descargas } = useJornadasDescargasRealtime(dataHoje);
 
   const emAndamento = useMemo(() => rotas.filter((r) => r.status === "em_andamento"), [rotas]);
   const concluidas = useMemo(() => rotas.filter((r) => r.status === "concluida"), [rotas]);
@@ -110,6 +115,23 @@ export default function DashboardPage() {
         )}
       </main>
 
+      {/* Jornada e Descargas */}
+      {(jornadas.length > 0 || descargas.length > 0) && (
+        <section className="px-5 pb-6 max-w-4xl mx-auto w-full">
+          <h2 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">
+            Jornada &amp; Descargas
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {jornadas.map((j) => (
+              <JornadaCard key={j.id} jornada={j} />
+            ))}
+            {descargas.map((d) => (
+              <DescargaCard key={d.id} descarga={d} />
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* Rodapé */}
       <footer className="text-center py-4 text-xs text-gray-300">
         RotaFácil · Desenvolvido por Josevan Oliveira
@@ -140,6 +162,62 @@ function KpiCard({
         {valor}
       </p>
       {sub && <p className="text-xs text-gray-400 mt-1">{sub}</p>}
+    </div>
+  );
+}
+
+function JornadaCard({ jornada }: { jornada: Jornada }) {
+  const aberta = !jornada.hora_fim;
+  return (
+    <div className={`bg-white rounded-2xl border p-4 shadow-sm flex gap-3 items-start ${aberta ? "border-blue-200" : "border-gray-100"}`}>
+      <div className={`mt-0.5 rounded-full p-2 ${aberta ? "bg-blue-50" : "bg-gray-50"}`}>
+        <Clock size={16} className={aberta ? "text-blue-600" : "text-gray-400"} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <p className="text-sm font-semibold text-gray-800">Jornada</p>
+          {aberta ? (
+            <span className="text-xs bg-blue-100 text-blue-700 font-semibold px-2 py-0.5 rounded-full">em andamento</span>
+          ) : (
+            <span className="text-xs bg-gray-100 text-gray-500 font-semibold px-2 py-0.5 rounded-full">encerrada</span>
+          )}
+        </div>
+        {jornada.motorista && (
+          <p className="text-xs text-gray-500 mt-0.5">{jornada.motorista}</p>
+        )}
+        <p className="text-xs text-gray-400 mt-1">
+          {jornada.hora_inicio}
+          {jornada.hora_fim ? ` → ${jornada.hora_fim}` : " → em andamento"}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function DescargaCard({ descarga }: { descarga: Descarga }) {
+  const aberta = !descarga.hora_fim;
+  return (
+    <div className={`bg-white rounded-2xl border p-4 shadow-sm flex gap-3 items-start ${aberta ? "border-amber-200" : "border-gray-100"}`}>
+      <div className={`mt-0.5 rounded-full p-2 ${aberta ? "bg-amber-50" : "bg-gray-50"}`}>
+        <PackageOpen size={16} className={aberta ? "text-amber-600" : "text-gray-400"} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <p className="text-sm font-semibold text-gray-800">Descarga</p>
+          {aberta ? (
+            <span className="text-xs bg-amber-100 text-amber-700 font-semibold px-2 py-0.5 rounded-full">em andamento</span>
+          ) : (
+            <span className="text-xs bg-gray-100 text-gray-500 font-semibold px-2 py-0.5 rounded-full">concluída</span>
+          )}
+        </div>
+        <p className="text-xs text-gray-400 mt-1">
+          {descarga.hora_inicio}
+          {descarga.hora_fim ? ` → ${descarga.hora_fim}` : " → em andamento"}
+        </p>
+        {descarga.observacao && (
+          <p className="text-xs text-gray-500 mt-1 truncate">{descarga.observacao}</p>
+        )}
+      </div>
     </div>
   );
 }

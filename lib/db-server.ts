@@ -67,6 +67,29 @@ function initSchema(db: Database.Database): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_rotas_data ON rotas(data);
+
+    CREATE TABLE IF NOT EXISTS jornadas (
+      id INTEGER PRIMARY KEY,
+      data TEXT NOT NULL UNIQUE,
+      hora_inicio TEXT NOT NULL,
+      hora_fim TEXT,
+      motorista TEXT,
+      criado_em TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_jornadas_data ON jornadas(data);
+
+    CREATE TABLE IF NOT EXISTS descargas (
+      id INTEGER PRIMARY KEY,
+      data TEXT NOT NULL,
+      hora_inicio TEXT NOT NULL,
+      hora_fim TEXT,
+      motoristas_ids TEXT NOT NULL DEFAULT '[]',
+      observacao TEXT,
+      criado_em TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_descargas_data ON descargas(data);
   `);
 }
 
@@ -209,6 +232,86 @@ export function upsertVeiculo(payload: {
 
 export function deletarVeiculo(id: number) {
   getDB().prepare("DELETE FROM veiculos WHERE id = ?").run(id);
+}
+
+// ── Jornadas ─────────────────────────────────────────────────────
+
+export function upsertJornada(payload: {
+  id: number;
+  data: string;
+  hora_inicio: string;
+  hora_fim?: string | null;
+  motorista?: string | null;
+  criado_em: string;
+}) {
+  const db = getDB();
+  db.prepare(`
+    INSERT INTO jornadas (id, data, hora_inicio, hora_fim, motorista, criado_em)
+    VALUES (@id, @data, @hora_inicio, @hora_fim, @motorista, @criado_em)
+    ON CONFLICT(id) DO UPDATE SET
+      hora_inicio = excluded.hora_inicio,
+      hora_fim = excluded.hora_fim,
+      motorista = excluded.motorista
+  `).run({
+    ...payload,
+    hora_fim: payload.hora_fim ?? null,
+    motorista: payload.motorista ?? null,
+  });
+}
+
+export function getJornadasPorData(data: string) {
+  return getDB().prepare("SELECT * FROM jornadas WHERE data = ? ORDER BY hora_inicio").all(data);
+}
+
+export function getJornadasRecentes(limite = 30) {
+  const db = getDB();
+  const dataLimite = new Date();
+  dataLimite.setDate(dataLimite.getDate() - limite);
+  const isoLimite = dataLimite.toISOString().split("T")[0];
+  return db.prepare("SELECT * FROM jornadas WHERE data >= ? ORDER BY data DESC").all(isoLimite);
+}
+
+// ── Descargas ────────────────────────────────────────────────────
+
+export function upsertDescarga(payload: {
+  id: number;
+  data: string;
+  hora_inicio: string;
+  hora_fim?: string | null;
+  motoristas_ids: number[];
+  observacao?: string | null;
+  criado_em: string;
+}) {
+  const db = getDB();
+  db.prepare(`
+    INSERT INTO descargas (id, data, hora_inicio, hora_fim, motoristas_ids, observacao, criado_em)
+    VALUES (@id, @data, @hora_inicio, @hora_fim, @motoristas_ids, @observacao, @criado_em)
+    ON CONFLICT(id) DO UPDATE SET
+      hora_inicio = excluded.hora_inicio,
+      hora_fim = excluded.hora_fim,
+      motoristas_ids = excluded.motoristas_ids,
+      observacao = excluded.observacao
+  `).run({
+    ...payload,
+    hora_fim: payload.hora_fim ?? null,
+    motoristas_ids: JSON.stringify(payload.motoristas_ids),
+    observacao: payload.observacao ?? null,
+  });
+}
+
+export function getDescargasPorData(data: string) {
+  const db = getDB();
+  const rows = db.prepare("SELECT * FROM descargas WHERE data = ? ORDER BY hora_inicio").all(data) as any[];
+  return rows.map((r) => ({ ...r, motoristas_ids: JSON.parse(r.motoristas_ids || "[]") }));
+}
+
+export function getDescargasRecentes(limite = 30) {
+  const db = getDB();
+  const dataLimite = new Date();
+  dataLimite.setDate(dataLimite.getDate() - limite);
+  const isoLimite = dataLimite.toISOString().split("T")[0];
+  const rows = db.prepare("SELECT * FROM descargas WHERE data >= ? ORDER BY data DESC").all(isoLimite) as any[];
+  return rows.map((r) => ({ ...r, motoristas_ids: JSON.parse(r.motoristas_ids || "[]") }));
 }
 
 // ── Helpers ──────────────────────────────────────────────────────
