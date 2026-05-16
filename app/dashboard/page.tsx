@@ -7,6 +7,7 @@ import { useJornadasDescargasRealtime } from "@/hooks/useJornadasDescargasRealti
 import { useNotificacoes } from "@/hooks/useNotificacoes";
 import { TopBar } from "@/components/layout/TopBar";
 import { RotaCard } from "@/components/dashboard/RotaCard";
+import { PainelAlertas } from "@/components/dashboard/PainelAlertas";
 import type { EventoNotificacao, Jornada, Descarga } from "@/lib/types";
 
 function hoje() {
@@ -76,6 +77,9 @@ export default function DashboardPage() {
           alerta={totalOcorrencias > 0}
         />
       </div>
+
+      {/* Alertas operacionais */}
+      <PainelAlertas rotas={rotas} />
 
       {/* Conteúdo */}
       <main className="flex-1 px-5 pb-8">
