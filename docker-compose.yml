@@ -1,6 +1,10 @@
 services:
   routelog:
-    build: .
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: https://rnplssnimdpstbbbzvkg.supabase.co
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJucGxzc25pbWRwc3RiYmJ6dmtnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIwNDEzNzYsImV4cCI6MjA4NzYxNzM3Nn0.iemhW4p3T9in34UtpTL6ZebXLdfgRw6G8VvfqEC7lLc
     restart: unless-stopped
     ports:
       - "3000:3000"

@@ -3,9 +3,83 @@ export const dynamic = "force-dynamic";
 
 import { useCallback, useMemo, useRef, useEffect, useState } from "react";
 import Link from "next/link";
-import { Truck, MapPin, CheckCircle2, Clock, AlertTriangle, Package, ChevronRight, Wifi, WifiOff } from "lucide-react";
+import { CheckCircle2, Clock, AlertTriangle, Package, ChevronRight, Wifi, WifiOff, Navigation } from "lucide-react";
+import { NavBar } from "@/components/layout/NavBar";
+import { createClient } from "@supabase/supabase-js";
 import { useRotasRealtime } from "@/hooks/useRotasRealtime";
 import type { Rota, ItemRota, EventoNotificacao } from "@/lib/types";
+
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
+interface PosicaoGPS {
+  rota_id: string;
+  lat: number;
+  lng: number;
+  velocidade: number | null;
+  motorista: string;
+  veiculo_placa: string;
+  criado_em: string;
+  status: string;
+}
+
+// Hook que mantém as últimas posições GPS de todos os motoristas ativos
+function usePosicoes(rotaIds: string[]) {
+  const [posicoes, setPosicoes] = useState<Map<string, PosicaoGPS>>(new Map());
+
+  useEffect(() => {
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY || rotaIds.length === 0) return;
+    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    // Carrega últimas posições de todos os IDs
+    supabase
+      .from("localizacoes")
+      .select("*")
+      .in("rota_id", rotaIds)
+      .order("criado_em", { ascending: false })
+      .then(({ data }) => {
+        if (!data) return;
+        const mapa = new Map<string, PosicaoGPS>();
+        // Fica com a mais recente de cada rota_id
+        for (const row of data) {
+          if (!mapa.has(row.rota_id)) mapa.set(row.rota_id, row as PosicaoGPS);
+        }
+        setPosicoes(mapa);
+      });
+
+    // Escuta inserções em tempo real
+    const canal = supabase
+      .channel("mapa-geral-gps")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "localizacoes" }, (p) => {
+        const nova = p.new as PosicaoGPS;
+        if (!rotaIds.includes(nova.rota_id)) return;
+        setPosicoes((prev) => new Map(prev).set(nova.rota_id, nova));
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(canal); };
+  }, [rotaIds.join(",")]);
+
+  return posicoes;
+}
+
+function IconeTruck({ size = 16, color = "currentColor" }: { size?: number; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5 17H3a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v3"/>
+      <rect x="9" y="11" width="14" height="10" rx="2"/>
+      <circle cx="12" cy="21" r="1"/><circle cx="20" cy="21" r="1"/>
+    </svg>
+  );
+}
+
+function IconeMapPin({ size = 14, color = "currentColor" }: { size?: number; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
+    </svg>
+  );
+}
 
 function hoje() {
   const d = new Date();
@@ -61,10 +135,11 @@ function mapsEmbedMultiplo(rotas: Rota[]): string {
 }
 
 // ── Card lateral de cada motorista ──────────────────────────
-function MotoristaCard({ rota, selecionado, onSelecionar }: {
+function MotoristaCard({ rota, selecionado, onSelecionar, posicao }: {
   rota: Rota;
   selecionado: boolean;
   onSelecionar: () => void;
+  posicao?: PosicaoGPS | null;
 }) {
   const cor = corStatus(rota);
   const concluidas = rota.itens.filter((i) => i.concluido).length;
@@ -84,7 +159,7 @@ function MotoristaCard({ rota, selecionado, onSelecionar }: {
           className="mt-0.5 rounded-lg p-1.5 flex-shrink-0"
           style={{ backgroundColor: cor.bg }}
         >
-          <Truck size={14} style={{ color: cor.text }} />
+          <IconeTruck size={14} color={cor.text} />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-1">
@@ -93,7 +168,15 @@ function MotoristaCard({ rota, selecionado, onSelecionar }: {
               {labelStatus(rota)}
             </span>
           </div>
-          <p className="text-xs text-gray-400 mt-0.5">{rota.veiculo_placa}</p>
+          <div className="flex items-center gap-2 mt-0.5">
+            <p className="text-xs text-gray-400">{rota.veiculo_placa}</p>
+            {posicao && (
+              <span className="flex items-center gap-1 text-xs text-green-600 font-semibold">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse inline-block" />
+                GPS ao vivo{posicao.velocidade != null && posicao.velocidade > 0 ? ` · ${Math.round(posicao.velocidade * 3.6)}km/h` : ""}
+              </span>
+            )}
+          </div>
           <p className="text-xs text-gray-500 mt-1 truncate">{cidadeAtual(rota)}</p>
 
           {/* Barra de progresso */}
@@ -161,7 +244,7 @@ function PainelDetalhe({ rota }: { rota: Rota }) {
             }`}>
               {item.concluido
                 ? <CheckCircle2 size={12} className="text-green-600" />
-                : <MapPin size={11} className="text-gray-400" />
+                : <IconeTruck size={11} color="#9ca3af" />
               }
             </div>
             <div className="flex-1 min-w-0">
@@ -173,12 +256,20 @@ function PainelDetalhe({ rota }: { rota: Rota }) {
             {(item.ocorrencias?.length ?? 0) > 0 && (
               <AlertTriangle size={11} className="text-amber-500 flex-shrink-0" />
             )}
-            <MapPin size={11} className="text-gray-300 group-hover:text-blue-400 flex-shrink-0 transition-colors" />
+            <IconeMapPin size={11} color="#d1d5db" />
           </a>
         ))}
       </div>
     </div>
   );
+}
+
+// Gera o sessionId do Supabase a partir dos dados da rota (mesmo algoritmo do app mobile)
+function gerarSessionId(data: string, placa: string, horaSaida: string, rotaId: number): string {
+  const d = data.replace(/-/g, "");
+  const p = placa.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+  const h = horaSaida.replace(":", "");
+  return `${d}-${p}-${h}-R${rotaId}`;
 }
 
 // ── Página principal ────────────────────────────────────────
@@ -195,8 +286,39 @@ export default function MapaGeralPage() {
   const concluidas = useMemo(() => rotas.filter((r) => r.status === "concluida"), [rotas]);
   const rotaSelecionada = useMemo(() => rotas.find((r) => r.id === rotaSelecionadaId) ?? null, [rotas, rotaSelecionadaId]);
 
-  // Atualiza o src do iframe via ref para não recarregar o mapa ao mudar de rota
+  // Monta mapa de sessionId → rotaId para as rotas em andamento
+  const sessionIds = useMemo(() =>
+    rotas
+      .filter((r) => r.status === "em_andamento" && r.hora_saida && r.id)
+      .map((r) => gerarSessionId(r.data, r.veiculo_placa, r.hora_saida, r.id)),
+    [rotas]
+  );
+
+  // Mapa sessionId → rota para lookup rápido
+  const sessionParaRota = useMemo(() => {
+    const m = new Map<string, Rota>();
+    rotas.filter((r) => r.status === "em_andamento" && r.hora_saida && r.id).forEach((r) => {
+      m.set(gerarSessionId(r.data, r.veiculo_placa, r.hora_saida, r.id), r);
+    });
+    return m;
+  }, [rotas]);
+
+  // Posições GPS em tempo real
+  const posicoes = usePosicoes(sessionIds);
+
+  // sessionId da rota selecionada
+  const sessionSelecionada = useMemo(() => {
+    if (!rotaSelecionada || !rotaSelecionada.hora_saida) return null;
+    return gerarSessionId(rotaSelecionada.data, rotaSelecionada.veiculo_placa, rotaSelecionada.hora_saida, rotaSelecionada.id);
+  }, [rotaSelecionada]);
+
+  const posicaoSelecionada = sessionSelecionada ? posicoes.get(sessionSelecionada) ?? null : null;
+
+  // URL do mapa: se tiver GPS real usa lat/lng, senão fallback para cidade
   const embedUrl = useMemo(() => {
+    if (posicaoSelecionada) {
+      return `https://maps.google.com/maps?q=${posicaoSelecionada.lat},${posicaoSelecionada.lng}&z=14&output=embed`;
+    }
     if (rotaSelecionada) {
       const prox = proximaCidade(rotaSelecionada) ?? ultimaCidadeConcluida(rotaSelecionada);
       if (prox) {
@@ -204,8 +326,13 @@ export default function MapaGeralPage() {
         return `https://maps.google.com/maps?q=${q}&z=11&output=embed`;
       }
     }
+    // Fallback: primeiro motorista com GPS ou primeira cidade
+    const primeiroPosicao = posicoes.size > 0 ? [...posicoes.values()][0] : null;
+    if (primeiroPosicao) {
+      return `https://maps.google.com/maps?q=${primeiroPosicao.lat},${primeiroPosicao.lng}&z=11&output=embed`;
+    }
     return mapsEmbedMultiplo(rotas);
-  }, [rotaSelecionada, rotas]);
+  }, [posicaoSelecionada, rotaSelecionada, posicoes, rotas]);
 
   useEffect(() => {
     if (!embedUrl || embedUrl === iframeSrcRef.current) return;
@@ -215,30 +342,23 @@ export default function MapaGeralPage() {
 
   return (
     <div className="h-screen flex flex-col bg-gray-50 overflow-hidden">
-      {/* Header */}
-      <header className="bg-[#0d47a1] text-white px-5 py-3 flex items-center justify-between shadow-md flex-shrink-0">
+      <NavBar />
+      {/* Sub-header com status ao vivo */}
+      <div className="bg-[#0d47a1]/90 text-white px-5 py-1.5 flex items-center justify-between text-xs flex-shrink-0 border-t border-white/10">
+        <span className="text-blue-200">{emAndamento.length} em rota · {concluidas.length} concluída{concluidas.length !== 1 ? "s" : ""}</span>
         <div className="flex items-center gap-3">
-          <Link href="/dashboard" className="flex items-center gap-2 text-white/70 hover:text-white text-sm transition-colors">
-            ← Dashboard
-          </Link>
-          <span className="text-white/30">|</span>
-          <div>
-            <h1 className="text-lg font-bold">Mapa Geral</h1>
-            <p className="text-xs text-blue-200">Todos os motoristas hoje</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="text-xs text-blue-200">
-            {emAndamento.length} em rota · {concluidas.length} concluída{concluidas.length !== 1 ? "s" : ""}
-          </div>
-          <div className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${
-            conectado ? "bg-green-500/30 text-green-100" : "bg-black/20 text-red-200"
-          }`}>
-            {conectado ? <Wifi size={12} /> : <WifiOff size={12} />}
+          {posicoes.size > 0 && (
+            <div className="flex items-center gap-1.5 text-green-300">
+              <Navigation size={11} />
+              {posicoes.size} GPS ativo{posicoes.size !== 1 ? "s" : ""}
+            </div>
+          )}
+          <div className={`flex items-center gap-1.5 ${conectado ? "text-white/60" : "text-red-300"}`}>
+            {conectado ? <Wifi size={11} /> : <WifiOff size={11} />}
             {conectado ? "Ao vivo" : "Reconectando"}
           </div>
         </div>
-      </header>
+      </div>
 
       {/* Conteúdo */}
       <div className="flex-1 flex overflow-hidden">
@@ -252,7 +372,7 @@ export default function MapaGeralPage() {
               </div>
             ) : rotas.length === 0 ? (
               <div className="text-center py-16">
-                <Truck size={36} className="text-gray-200 mx-auto mb-3" />
+                <div className="mx-auto mb-3 flex items-center justify-center w-14 h-14 rounded-2xl bg-gray-100"><IconeTruck size={28} color="#d1d5db" /></div>
                 <p className="text-sm text-gray-400">Nenhuma rota hoje</p>
               </div>
             ) : (
@@ -262,14 +382,18 @@ export default function MapaGeralPage() {
                     <p className="text-xs font-bold text-gray-400 uppercase tracking-widest px-1 pt-1">
                       Em rota ({emAndamento.length})
                     </p>
-                    {emAndamento.map((r) => (
-                      <MotoristaCard
-                        key={r.id}
-                        rota={r}
-                        selecionado={r.id === rotaSelecionadaId}
-                        onSelecionar={() => setRotaSelecionadaId(r.id === rotaSelecionadaId ? null : r.id)}
-                      />
-                    ))}
+                    {emAndamento.map((r) => {
+                      const sid = r.hora_saida ? gerarSessionId(r.data, r.veiculo_placa, r.hora_saida, r.id) : null;
+                      return (
+                        <MotoristaCard
+                          key={r.id}
+                          rota={r}
+                          selecionado={r.id === rotaSelecionadaId}
+                          onSelecionar={() => setRotaSelecionadaId(r.id === rotaSelecionadaId ? null : r.id)}
+                          posicao={sid ? posicoes.get(sid) : null}
+                        />
+                      );
+                    })}
                   </>
                 )}
                 {concluidas.length > 0 && (
@@ -312,7 +436,7 @@ export default function MapaGeralPage() {
           />
           {rotas.length === 0 && !carregando && (
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-100">
-              <MapPin size={48} className="text-gray-300 mb-3" />
+              <div className="mb-3 flex items-center justify-center w-20 h-20 rounded-3xl bg-gray-200"><IconeTruck size={40} color="#d1d5db" /></div>
               <p className="text-gray-400 font-medium">Nenhuma rota para exibir</p>
             </div>
           )}
@@ -321,9 +445,10 @@ export default function MapaGeralPage() {
           {rotas.length > 0 && (
             <div className="absolute bottom-4 right-4 bg-white rounded-xl shadow-lg border border-gray-100 p-3 space-y-1.5 text-xs">
               <p className="font-semibold text-gray-600 mb-2">Legenda</p>
-              <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-blue-500" /><span className="text-gray-500">Em rota</span></div>
-              <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-amber-400" /><span className="text-gray-500">Com ocorrência</span></div>
-              <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-green-500" /><span className="text-gray-500">Concluída</span></div>
+              <div className="flex items-center gap-2"><div className="flex items-center justify-center w-5 h-5 rounded bg-blue-100"><IconeTruck size={12} color="#1d4ed8" /></div><span className="text-gray-500">Em rota</span></div>
+              <div className="flex items-center gap-2"><div className="flex items-center justify-center w-5 h-5 rounded bg-amber-100"><IconeTruck size={12} color="#b45309" /></div><span className="text-gray-500">Com ocorrência</span></div>
+              <div className="flex items-center gap-2"><div className="flex items-center justify-center w-5 h-5 rounded bg-green-100"><IconeTruck size={12} color="#15803d" /></div><span className="text-gray-500">Concluída</span></div>
+              <div className="flex items-center gap-2 pt-1 border-t border-gray-50"><span className="w-2 h-2 rounded-full bg-green-500 animate-pulse inline-block" /><span className="text-gray-400">GPS ao vivo ativo</span></div>
               <p className="text-gray-300 pt-1 border-t border-gray-50">Toque no motorista para<br/>centralizar no mapa</p>
             </div>
           )}

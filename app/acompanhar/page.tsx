@@ -1,14 +1,12 @@
 "use client";
+export const dynamic = "force-dynamic";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { useRouter } from "next/navigation";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
-interface Cidade { id: number; nome: string; uf: string | null; }
-interface RotaItem { cidadeNome: string; concluido?: boolean; }
+interface Cidade { id: number; nome: string; uf: string | null; status?: "ativa" | "concluida"; rotaId?: number; }
+interface RotaItem { cidadeNome: string; cidadeUf?: string | null; concluido?: boolean; }
 interface Rota { id: number; status: string; itens: RotaItem[]; motorista: string; }
 
 function hoje() {
@@ -55,18 +53,71 @@ export default function AcompanharPage() {
   const [busca, setBusca] = useState("");
   const [estado, setEstado] = useState<Estado>({ tipo: "selecionando" });
   const inputRef = useRef<HTMLInputElement>(null);
-  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const supabase = useMemo(() => createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  ), []);
 
   const cidadesFiltradas = cidades.filter(c =>
     c.nome.toLowerCase().includes(busca.toLowerCase()) ||
     (c.uf ?? "").toLowerCase().includes(busca.toLowerCase())
   );
+  const cidadesAtivas = cidadesFiltradas.filter(c => c.status === "ativa");
+  const cidadesConcluidas = cidadesFiltradas.filter(c => c.status === "concluida");
 
   useEffect(() => {
-    supabase.from("cidades").select("id, nome, uf").order("nome").then(({ data }) => {
-      if (data) setCidades(data);
-    });
+    async function carregarCidadesDeHoje() {
+      const { data: rotas } = await supabase
+        .from("rotas")
+        .select("id, status, itens")
+        .eq("data", hoje())
+        .in("status", ["em_andamento", "concluida"]);
+
+      if (!rotas || rotas.length === 0) {
+        setCidades([]);
+        return;
+      }
+
+      const mapa = new Map<string, Cidade>();
+      let autoId = 1;
+      for (const rota of rotas) {
+        const itens: RotaItem[] = typeof rota.itens === "string" ? JSON.parse(rota.itens) : rota.itens ?? [];
+        for (const item of itens) {
+          const nome = item.cidadeNome?.trim();
+          if (!nome) continue;
+          const chave = nome.toLowerCase();
+          if (!mapa.has(chave)) {
+            mapa.set(chave, {
+              id: autoId++,
+              nome,
+              uf: item.cidadeUf ?? null,
+              status: rota.status === "em_andamento" ? "ativa" : "concluida",
+              rotaId: rota.id,
+            });
+          } else if (rota.status === "em_andamento") {
+            // Se já existe como concluída mas agora tem uma ativa, atualiza
+            const existing = mapa.get(chave)!;
+            if (existing.status === "concluida") {
+              mapa.set(chave, { ...existing, status: "ativa", rotaId: rota.id });
+            }
+          }
+        }
+      }
+
+      const lista = Array.from(mapa.values()).sort((a, b) => {
+        if (a.status === "ativa" && b.status !== "ativa") return -1;
+        if (a.status !== "ativa" && b.status === "ativa") return 1;
+        return a.nome.localeCompare(b.nome);
+      });
+      setCidades(lista);
+    }
+
+    carregarCidadesDeHoje();
     setTimeout(() => inputRef.current?.focus(), 100);
+
+    // Atualizar a cada 60s para refletir novas rotas criadas
+    const intervalo = setInterval(carregarCidadesDeHoje, 60_000);
+    return () => clearInterval(intervalo);
   }, []);
 
   async function selecionarCidade(cidade: Cidade) {
@@ -139,7 +190,11 @@ export default function AcompanharPage() {
           </div>
 
           <h1 style={styles.titulo}>Acompanhar entrega</h1>
-          <p style={styles.subtitulo}>Selecione a cidade para ver a rota ao vivo</p>
+          <p style={styles.subtitulo}>
+            {cidades.length > 0
+              ? `${cidadesAtivas.length} cidade${cidadesAtivas.length !== 1 ? "s" : ""} com rota ativa hoje`
+              : "Selecione a cidade para ver a rota ao vivo"}
+          </p>
 
           {/* Campo de busca */}
           <div style={styles.searchBox}>
@@ -155,15 +210,53 @@ export default function AcompanharPage() {
 
           {/* Lista */}
           <div style={styles.lista}>
-            {cidadesFiltradas.length === 0 ? (
+            {cidades.length === 0 ? (
+              <div style={styles.vazio}>
+                <svg width={28} height={28} viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: 8 }}>
+                  <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+                <div>Nenhuma rota ativa hoje</div>
+                <div style={{ fontSize: 11, color: "#334155", marginTop: 4 }}>As entregas ainda não foram iniciadas</div>
+              </div>
+            ) : cidadesFiltradas.length === 0 ? (
               <div style={styles.vazio}>Nenhuma cidade encontrada</div>
             ) : (
-              cidadesFiltradas.map(c => (
-                <button key={c.id} style={styles.cidadeItem} onClick={() => selecionarCidade(c)}>
-                  <div style={styles.cidadeNome}>{c.nome}</div>
-                  {c.uf && <div style={styles.cidadeUf}>{c.uf}</div>}
-                </button>
-              ))
+              <>
+                {cidadesAtivas.length > 0 && (
+                  <>
+                    <div style={styles.grupoLabel}>
+                      <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: "#22c55e", marginRight: 6 }} />
+                      Em andamento ({cidadesAtivas.length})
+                    </div>
+                    {cidadesAtivas.map(c => (
+                      <button key={c.id} style={styles.cidadeItem} onClick={() => selecionarCidade(c)}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: "#22c55e", flexShrink: 0 }} />
+                          <span style={styles.cidadeNome}>{c.nome}</span>
+                        </div>
+                        {c.uf && <div style={styles.cidadeUf}>{c.uf}</div>}
+                      </button>
+                    ))}
+                  </>
+                )}
+                {cidadesConcluidas.length > 0 && (
+                  <>
+                    <div style={{ ...styles.grupoLabel, marginTop: cidadesAtivas.length > 0 ? 12 : 0 }}>
+                      <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: "#475569", marginRight: 6 }} />
+                      Concluídas hoje ({cidadesConcluidas.length})
+                    </div>
+                    {cidadesConcluidas.map(c => (
+                      <button key={c.id} style={{ ...styles.cidadeItem, opacity: 0.6 }} onClick={() => selecionarCidade(c)}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <IconeCheck size={12} color="#475569" />
+                          <span style={{ ...styles.cidadeNome, color: "#64748b" }}>{c.nome}</span>
+                        </div>
+                        {c.uf && <div style={styles.cidadeUf}>{c.uf}</div>}
+                      </button>
+                    ))}
+                  </>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -348,11 +441,24 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 6,
     padding: "2px 8px",
   },
+  grupoLabel: {
+    color: "#475569",
+    fontSize: 10,
+    fontWeight: 700,
+    textTransform: "uppercase" as const,
+    letterSpacing: "0.08em",
+    padding: "4px 14px",
+    display: "flex",
+    alignItems: "center",
+  },
   vazio: {
     color: "#475569",
     fontSize: 13,
     textAlign: "center",
     padding: "24px 0",
+    display: "flex",
+    flexDirection: "column" as const,
+    alignItems: "center",
   },
   spinner: {
     width: 28,

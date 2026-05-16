@@ -5,8 +5,9 @@ import { useState, useMemo, useCallback } from "react";
 import Link from "next/link";
 import {
   BarChart2, Package, AlertTriangle, CheckCircle2, Truck,
-  Download, Search, ChevronDown, ChevronUp, FileText, Wifi, WifiOff,
+  Download, Search, ChevronDown, ChevronUp, FileText, Users,
 } from "lucide-react";
+import { NavBar } from "@/components/layout/NavBar";
 import type { Rota, ItemRota, Ocorrencia } from "@/lib/types";
 import { LABELS_OCORRENCIA } from "@/lib/types";
 
@@ -332,19 +333,7 @@ export default function RelatoriosPage() {
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
-      {/* Header */}
-      <header className="bg-[#0d47a1] text-white px-5 py-3 flex items-center justify-between shadow-md flex-shrink-0">
-        <div className="flex items-center gap-3">
-          <Link href="/dashboard" className="text-white/70 hover:text-white text-sm transition-colors">← Dashboard</Link>
-          <span className="text-white/30">|</span>
-          <div>
-            <h1 className="text-lg font-bold flex items-center gap-2">
-              <BarChart2 size={18} /> Relatórios
-            </h1>
-            <p className="text-xs text-blue-200">Histórico e exportação</p>
-          </div>
-        </div>
-      </header>
+      <NavBar />
 
       <main className="flex-1 px-5 py-6 max-w-5xl mx-auto w-full space-y-5">
 

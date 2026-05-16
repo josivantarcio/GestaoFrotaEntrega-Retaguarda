@@ -1,5 +1,5 @@
 "use client";
-import { Wifi, WifiOff, Bell, BellOff, MapPin, MessageCircle, BarChart2 } from "lucide-react";
+import { Wifi, WifiOff, Bell, BellOff, MapPin, MessageCircle, BarChart2, LayoutDashboard } from "lucide-react";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
@@ -91,6 +91,14 @@ export function TopBar({ conectado }: { conectado: boolean }) {
           <MessageCircle size={13} />
           Avisar grupo
         </button>
+
+        <Link
+          href="/gestao"
+          className="flex items-center gap-1.5 bg-white/20 hover:bg-white/30 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors"
+        >
+          <LayoutDashboard size={13} />
+          Gestão
+        </Link>
 
         <Link
           href="/relatorios"
