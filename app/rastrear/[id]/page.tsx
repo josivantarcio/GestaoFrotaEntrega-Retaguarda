@@ -7,14 +7,14 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
 interface Localizacao {
-  id: number; rota_id: number; lat: number; lng: number;
+  id: number; rota_id: string | number; lat: number; lng: number;
   velocidade: number | null; criado_em: string;
   motorista?: string; veiculo_placa?: string;
   hora_saida?: string; data?: string; status?: string;
 }
 
 interface Evento {
-  id: number; rota_id: number; tipo: string;
+  id: number; rota_id: string | number; tipo: string;
   payload: Record<string, any>; criado_em: string;
 }
 
@@ -176,7 +176,8 @@ function EventoDetalhe({ ev }: { ev: Evento }) {
 
 export default function RastrearPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const rotaId = Number(id);
+  // ID pode ser string composta "YYYYMMDD-PLACA-HHMM" (novo) ou numérico legado
+  const rotaId = id;
   const [posicao, setPosicao]           = useState<Localizacao | null>(null);
   const [encerrada, setEncerrada]       = useState(false);
   const [ultimaAtu, setUltimaAtu]       = useState<Date | null>(null);
