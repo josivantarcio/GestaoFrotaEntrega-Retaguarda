@@ -107,6 +107,45 @@ CREATE POLICY "escrita service role" ON veiculos
 CREATE POLICY "escrita service role" ON rotas
   FOR ALL USING (auth.role() = 'service_role');
 
+-- ── Jornadas ─────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS jornadas (
+  id          BIGINT PRIMARY KEY,
+  data        DATE NOT NULL,
+  hora_inicio TEXT NOT NULL,
+  hora_fim    TEXT,
+  motorista   TEXT,
+  criado_em   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_jornadas_data ON jornadas(data DESC);
+
+ALTER TABLE jornadas ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "leitura publica" ON jornadas FOR SELECT USING (true);
+CREATE POLICY "escrita service role" ON jornadas
+  FOR ALL USING (auth.role() = 'service_role');
+
+-- ── Descargas ────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS descargas (
+  id             BIGINT PRIMARY KEY,
+  data           DATE NOT NULL,
+  hora_inicio    TEXT NOT NULL,
+  hora_fim       TEXT,
+  motoristas_ids TEXT NOT NULL DEFAULT '[]',
+  observacao     TEXT,
+  criado_em      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_descargas_data ON descargas(data DESC);
+
+ALTER TABLE descargas ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "leitura publica" ON descargas FOR SELECT USING (true);
+CREATE POLICY "escrita service role" ON descargas
+  FOR ALL USING (auth.role() = 'service_role');
+
 -- ── Realtime ──────────────────────────────────────────────────────────
 -- No painel Supabase: Database > Replication > marcar as tabelas abaixo
 -- Ou execute:
@@ -114,6 +153,8 @@ ALTER PUBLICATION supabase_realtime ADD TABLE rotas;
 ALTER PUBLICATION supabase_realtime ADD TABLE cidades;
 ALTER PUBLICATION supabase_realtime ADD TABLE entregadores;
 ALTER PUBLICATION supabase_realtime ADD TABLE veiculos;
+ALTER PUBLICATION supabase_realtime ADD TABLE jornadas;
+ALTER PUBLICATION supabase_realtime ADD TABLE descargas;
 
 -- ── Rastreamento em tempo real ────────────────────────────────────────
 
