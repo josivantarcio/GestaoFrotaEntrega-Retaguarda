@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDB } from "@/lib/db-server";
+import { getSupabaseServer } from "@/lib/supabase";
 
-export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
@@ -13,14 +12,19 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Parâmetros ?inicio=YYYY-MM-DD&fim=YYYY-MM-DD obrigatórios" }, { status: 400 });
   }
 
-  const db = getDB();
-  const rows = db.prepare(
-    "SELECT * FROM rotas WHERE data >= ? AND data <= ? ORDER BY data DESC, criado_em DESC"
-  ).all(inicio, fim) as any[];
+  const { data: rows, error } = await getSupabaseServer()
+    .from("rotas")
+    .select("*")
+    .gte("data", inicio)
+    .lte("data", fim)
+    .order("data", { ascending: false })
+    .order("criado_em", { ascending: false });
 
-  const rotas = rows.map((r) => ({
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  const rotas = (rows ?? []).map((r: any) => ({
     ...r,
-    itens: typeof r.itens === "string" ? JSON.parse(r.itens) : r.itens,
+    itens: typeof r.itens === "string" ? JSON.parse(r.itens) : (r.itens ?? []),
   }));
 
   return NextResponse.json(rotas);

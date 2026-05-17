@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState, useCallback } from "react";
+import { getSupabaseClient } from "@/lib/supabase";
 import type { Rota, ItemRota, Ocorrencia, EventoNotificacao } from "@/lib/types";
 
 interface Options {
@@ -23,86 +24,71 @@ export function useRotasRealtime({ dataFiltro, onEvento }: Options) {
     );
   }, []);
 
-  const carregar = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/sync/rotas?data=${dataFiltro}`);
-      if (!res.ok) return;
-      const data: Rota[] = await res.json();
-      const mapa = new Map<number, Rota>();
-      data.forEach((r) => mapa.set(r.id, r));
-      rotasRef.current = mapa;
-      setRotasOrdenadas(mapa);
-    } catch {
-      // silently ignore network errors
+  // Carregamento inicial via Supabase
+  useEffect(() => {
+    async function carregar() {
+      setCarregando(true);
+      try {
+        const { data } = await getSupabaseClient()
+          .from("rotas")
+          .select("*")
+          .eq("data", dataFiltro)
+          .order("criado_em", { ascending: false });
+
+        const mapa = new Map<number, Rota>();
+        (data ?? []).forEach((r: any) => {
+          mapa.set(r.id, {
+            ...r,
+            itens: typeof r.itens === "string" ? JSON.parse(r.itens) : (r.itens ?? []),
+          });
+        });
+        rotasRef.current = mapa;
+        setRotasOrdenadas(mapa);
+      } finally {
+        setCarregando(false);
+      }
     }
+    carregar();
   }, [dataFiltro, setRotasOrdenadas]);
 
-  // Carregamento inicial
+  // Supabase Realtime
   useEffect(() => {
-    setCarregando(true);
-    carregar().finally(() => setCarregando(false));
-  }, [carregar]);
+    const supabase = getSupabaseClient();
 
-  // Polling a cada 15s como fallback quando SSE não conecta
-  useEffect(() => {
-    const intervalo = setInterval(carregar, 15_000);
-    return () => clearInterval(intervalo);
-  }, [carregar]);
+    const channel = supabase
+      .channel(`rotas-${dataFiltro}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "rotas", filter: `data=eq.${dataFiltro}` },
+        (payload) => {
+          const nova = payload.new as any;
+          if (!nova?.id) return;
 
-  // SSE
-  useEffect(() => {
-    let es: EventSource | null = null;
-    let reconectarTimeout: ReturnType<typeof setTimeout> | null = null;
-    let ativo = true;
+          const rotaNova: Rota = {
+            ...nova,
+            itens: typeof nova.itens === "string" ? JSON.parse(nova.itens) : (nova.itens ?? []),
+          };
 
-    function conectar() {
-      if (!ativo) return;
-      es = new EventSource("/api/events");
-
-      es.onopen = () => {
-        if (ativo) setConectado(true);
-      };
-
-      es.onerror = () => {
-        setConectado(false);
-        es?.close();
-        if (ativo) {
-          reconectarTimeout = setTimeout(conectar, 7_000);
-        }
-      };
-
-      es.onmessage = (e: MessageEvent) => {
-        try {
-          const evento = JSON.parse(e.data) as { tipo: string; tabela: string; payload: unknown };
-          if (evento.tipo !== "rota_upserted" || evento.tabela !== "rotas") return;
-
-          const nova = evento.payload as Rota;
-          if (nova.data !== dataFiltro) return;
-
-          const antiga = rotasRef.current.get(nova.id);
+          const antiga = rotasRef.current.get(rotaNova.id);
 
           if (!antiga) {
-            onEventoRef.current({ tipo: "rota_iniciada", rota: nova });
-          } else if (nova.status === "concluida" && antiga.status !== "concluida") {
-            onEventoRef.current({ tipo: "rota_encerrada", rota: nova });
+            onEventoRef.current({ tipo: "rota_iniciada", rota: rotaNova });
+          } else if (rotaNova.status === "concluida" && antiga.status !== "concluida") {
+            onEventoRef.current({ tipo: "rota_encerrada", rota: rotaNova });
           } else {
-            detectarMudancasItens(antiga, nova, onEventoRef.current);
+            detectarMudancasItens(antiga, rotaNova, onEventoRef.current);
           }
 
-          rotasRef.current.set(nova.id, nova);
+          rotasRef.current.set(rotaNova.id, rotaNova);
           setRotasOrdenadas(rotasRef.current);
-        } catch {
-          // invalid JSON — ignore
         }
-      };
-    }
-
-    conectar();
+      )
+      .subscribe((status) => {
+        setConectado(status === "SUBSCRIBED");
+      });
 
     return () => {
-      ativo = false;
-      if (reconectarTimeout) clearTimeout(reconectarTimeout);
-      es?.close();
+      supabase.removeChannel(channel);
       setConectado(false);
     };
   }, [dataFiltro, setRotasOrdenadas]);

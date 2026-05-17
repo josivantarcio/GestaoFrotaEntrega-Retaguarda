@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verificarApiKey, respostaForbidden } from "@/lib/api-auth";
 import { deletarVeiculo } from "@/lib/db-server";
-import { broadcast } from "@/lib/sse-bus";
 
-export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function DELETE(
   req: NextRequest,
@@ -12,9 +11,6 @@ export async function DELETE(
   if (!verificarApiKey(req)) return respostaForbidden();
 
   const { id } = await params;
-  const numId = parseInt(id, 10);
-  deletarVeiculo(numId);
-  broadcast({ tipo: "deleted", tabela: "veiculos", payload: { id: numId } });
-
+  await deletarVeiculo(parseInt(id, 10));
   return NextResponse.json({ ok: true });
 }

@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDB } from "@/lib/db-server";
+import { getSupabaseServer } from "@/lib/supabase";
 
-export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
@@ -13,20 +12,22 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "?inicio=YYYY-MM-DD&fim=YYYY-MM-DD obrigatórios" }, { status: 400 });
   }
 
-  const db = getDB();
+  const { data: rows, error } = await getSupabaseServer()
+    .from("rotas")
+    .select("*")
+    .gte("data", inicio)
+    .lte("data", fim)
+    .order("data", { ascending: true });
 
-  const rows = db.prepare(
-    "SELECT * FROM rotas WHERE data >= ? AND data <= ? ORDER BY data ASC"
-  ).all(inicio, fim) as any[];
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  const rotas = rows.map((r) => ({
+  const rotas = (rows ?? []).map((r: any) => ({
     ...r,
-    itens: typeof r.itens === "string" ? JSON.parse(r.itens) : r.itens,
+    itens: typeof r.itens === "string" ? JSON.parse(r.itens) : (r.itens ?? []),
   }));
 
   const concluidas = rotas.filter((r: any) => r.status === "concluida");
 
-  // KPIs gerais
   const totalRotas = rotas.length;
   const totalConcluidas = concluidas.length;
   const totalVolumes = rotas.reduce((s: number, r: any) => s + (r.itens ?? []).reduce((si: number, i: any) => si + (i.volumesSaida ?? 0), 0), 0);
@@ -36,7 +37,6 @@ export async function GET(req: NextRequest) {
   const totalKm = concluidas.reduce((s: number, r: any) => s + (r.km_chegada && r.km_saida ? r.km_chegada - r.km_saida : 0), 0);
   const taxaEntrega = totalVolumes > 0 ? Math.round((totalEntregues / totalVolumes) * 100) : 0;
 
-  // Volumes por dia (para gráfico de tendência)
   const volumesPorDia: Record<string, { saida: number; entregues: number; rotas: number }> = {};
   for (const r of rotas) {
     if (!volumesPorDia[r.data]) volumesPorDia[r.data] = { saida: 0, entregues: 0, rotas: 0 };
@@ -50,7 +50,6 @@ export async function GET(req: NextRequest) {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([data, v]) => ({ data, ...v }));
 
-  // Desempenho por entregador
   const mapaEntregadores: Record<string, { nome: string; volumes: number; entregues: number; ocorrencias: number; cidades: number }> = {};
   for (const r of concluidas) {
     for (const i of r.itens ?? []) {
@@ -63,18 +62,9 @@ export async function GET(req: NextRequest) {
     }
   }
   const rankingEntregadores = Object.entries(mapaEntregadores)
-    .map(([id, e]) => ({
-      id,
-      nome: e.nome,
-      volumes: e.volumes,
-      entregues: e.entregues,
-      ocorrencias: e.ocorrencias,
-      cidades: e.cidades,
-      taxa: e.volumes > 0 ? Math.round((e.entregues / e.volumes) * 100) : 100,
-    }))
+    .map(([id, e]) => ({ id, ...e, taxa: e.volumes > 0 ? Math.round((e.entregues / e.volumes) * 100) : 100 }))
     .sort((a, b) => b.entregues - a.entregues);
 
-  // Ocorrências por tipo
   const ocsPorTipo: Record<string, number> = {};
   for (const r of rotas) {
     for (const i of r.itens ?? []) {
@@ -87,7 +77,6 @@ export async function GET(req: NextRequest) {
     .sort(([, a], [, b]) => b - a)
     .map(([tipo, qtd]) => ({ tipo, qtd }));
 
-  // Motoristas com mais rotas
   const mapaMotoristas: Record<string, { nome: string; rotas: number; km: number; volumes: number }> = {};
   for (const r of concluidas) {
     const m = r.motorista;

@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDB } from "@/lib/db-server";
+import { getSupabaseServer } from "@/lib/supabase";
 import type { TipoOcorrencia } from "@/lib/types";
 
-export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export interface DesempenhoEntregador {
@@ -27,14 +26,19 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Parâmetros ?inicio=YYYY-MM-DD&fim=YYYY-MM-DD obrigatórios" }, { status: 400 });
   }
 
-  const db = getDB();
-  const rows = db.prepare(
-    "SELECT * FROM rotas WHERE status='concluida' AND data >= ? AND data <= ? ORDER BY data DESC"
-  ).all(inicio, fim) as any[];
+  const { data: rows, error } = await getSupabaseServer()
+    .from("rotas")
+    .select("*")
+    .eq("status", "concluida")
+    .gte("data", inicio)
+    .lte("data", fim)
+    .order("data", { ascending: false });
 
-  const rotas = rows.map((r) => ({
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  const rotas = (rows ?? []).map((r: any) => ({
     ...r,
-    itens: typeof r.itens === "string" ? JSON.parse(r.itens) : r.itens,
+    itens: typeof r.itens === "string" ? JSON.parse(r.itens) : (r.itens ?? []),
   }));
 
   const mapa: Record<number, DesempenhoEntregador> = {};
@@ -74,13 +78,11 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // Calcula taxa de entrega
   for (const e of Object.values(mapa)) {
     e.taxaEntrega = e.volumesSaida > 0
       ? Math.round((e.volumesEntregues / e.volumesSaida) * 100)
       : 100;
   }
 
-  const resultado = Object.values(mapa).sort((a, b) => b.taxaEntrega - a.taxaEntrega);
-  return NextResponse.json(resultado);
+  return NextResponse.json(Object.values(mapa).sort((a, b) => b.taxaEntrega - a.taxaEntrega));
 }

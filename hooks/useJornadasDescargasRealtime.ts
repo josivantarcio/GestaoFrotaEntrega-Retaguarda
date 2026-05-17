@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState, useCallback } from "react";
+import { getSupabaseClient } from "@/lib/supabase";
 import type { Jornada, Descarga } from "@/lib/types";
 
 export function useJornadasDescargasRealtime(dataFiltro: string) {
@@ -9,74 +10,65 @@ export function useJornadasDescargasRealtime(dataFiltro: string) {
   const jornadasRef = useRef<Map<number, Jornada>>(new Map());
   const descargasRef = useRef<Map<number, Descarga>>(new Map());
 
-  const carregar = useCallback(async () => {
-    try {
-      const [rj, rd] = await Promise.all([
-        fetch(`/api/sync/jornadas?data=${dataFiltro}`).then((r) => r.json()),
-        fetch(`/api/sync/descargas?data=${dataFiltro}`).then((r) => r.json()),
+  // Carregamento inicial
+  useEffect(() => {
+    async function carregar() {
+      const supabase = getSupabaseClient();
+      const [{ data: rj }, { data: rd }] = await Promise.all([
+        supabase.from("jornadas").select("*").eq("data", dataFiltro).order("hora_inicio"),
+        supabase.from("descargas").select("*").eq("data", dataFiltro).order("hora_inicio"),
       ]);
 
       const mj = new Map<number, Jornada>();
-      (rj as Jornada[]).forEach((j) => mj.set(j.id, j));
+      (rj ?? []).forEach((j: any) => mj.set(j.id, j));
       jornadasRef.current = mj;
       setJornadas([...mj.values()]);
 
       const md = new Map<number, Descarga>();
-      (rd as Descarga[]).forEach((d) => md.set(d.id, d));
+      (rd ?? []).forEach((d: any) => md.set(d.id, {
+        ...d,
+        motoristas_ids: typeof d.motoristas_ids === "string" ? JSON.parse(d.motoristas_ids) : (d.motoristas_ids ?? []),
+      }));
       descargasRef.current = md;
       setDescargas([...md.values()]);
-    } catch {
-      // ignore
     }
+    carregar();
   }, [dataFiltro]);
 
+  // Supabase Realtime para jornadas e descargas
   useEffect(() => {
-    carregar();
-    const intervalo = setInterval(carregar, 30_000);
-    return () => clearInterval(intervalo);
-  }, [carregar]);
+    const supabase = getSupabaseClient();
 
-  // SSE: listen to the shared /api/events stream
-  useEffect(() => {
-    let es: EventSource | null = null;
-    let reconectarTimeout: ReturnType<typeof setTimeout> | null = null;
-    let ativo = true;
-
-    function conectar() {
-      if (!ativo) return;
-      es = new EventSource("/api/events");
-
-      es.onerror = () => {
-        es?.close();
-        if (ativo) reconectarTimeout = setTimeout(conectar, 7_000);
-      };
-
-      es.onmessage = (e: MessageEvent) => {
-        try {
-          const evento = JSON.parse(e.data) as { tipo: string; payload: unknown };
-
-          if (evento.tipo === "jornada_upserted") {
-            const j = evento.payload as Jornada;
-            if (j.data !== dataFiltro) return;
-            jornadasRef.current.set(j.id, j);
-            setJornadas([...jornadasRef.current.values()]);
-          } else if (evento.tipo === "descarga_upserted") {
-            const d = evento.payload as Descarga;
-            if (d.data !== dataFiltro) return;
-            descargasRef.current.set(d.id, d);
-            setDescargas([...descargasRef.current.values()]);
-          }
-        } catch {
-          // invalid JSON
+    const channel = supabase
+      .channel(`jornadas-descargas-${dataFiltro}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "jornadas", filter: `data=eq.${dataFiltro}` },
+        (payload) => {
+          const j = payload.new as Jornada;
+          if (!j?.id) return;
+          jornadasRef.current.set(j.id, j);
+          setJornadas([...jornadasRef.current.values()]);
         }
-      };
-    }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "descargas", filter: `data=eq.${dataFiltro}` },
+        (payload) => {
+          const d = payload.new as any;
+          if (!d?.id) return;
+          const descarga: Descarga = {
+            ...d,
+            motoristas_ids: typeof d.motoristas_ids === "string" ? JSON.parse(d.motoristas_ids) : (d.motoristas_ids ?? []),
+          };
+          descargasRef.current.set(descarga.id, descarga);
+          setDescargas([...descargasRef.current.values()]);
+        }
+      )
+      .subscribe();
 
-    conectar();
     return () => {
-      ativo = false;
-      if (reconectarTimeout) clearTimeout(reconectarTimeout);
-      es?.close();
+      supabase.removeChannel(channel);
     };
   }, [dataFiltro]);
 

@@ -1,101 +1,33 @@
-import Database from "better-sqlite3";
-import path from "path";
-import fs from "fs";
+// Camada de acesso a dados — Supabase (compatível com a interface anterior)
+import { getSupabaseServer } from "./supabase";
 
-const DATA_DIR = process.env.DATA_DIR ?? path.join(process.cwd(), "data");
-
-let _db: Database.Database | null = null;
-
-export function getDB(): Database.Database {
-  if (_db) return _db;
-
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-
-  const dbPath = path.join(DATA_DIR, "routelog.db");
-  _db = new Database(dbPath);
-  _db.pragma("journal_mode = WAL");
-  _db.pragma("foreign_keys = ON");
-  initSchema(_db);
-  return _db;
+function sb() {
+  return getSupabaseServer();
 }
 
-function initSchema(db: Database.Database): void {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS cidades (
-      id INTEGER PRIMARY KEY,
-      nome TEXT NOT NULL,
-      uf TEXT NOT NULL,
-      distancia_km REAL,
-      criado_em TEXT NOT NULL
-    );
+// ── Helpers ──────────────────────────────────────────────────────
 
-    CREATE TABLE IF NOT EXISTS entregadores (
-      id INTEGER PRIMARY KEY,
-      nome TEXT NOT NULL,
-      telefone TEXT NOT NULL,
-      cidades_ids TEXT NOT NULL DEFAULT '[]',
-      ativo INTEGER NOT NULL DEFAULT 1,
-      criado_em TEXT NOT NULL
-    );
+function parseItens(row: any) {
+  if (!row) return row;
+  return {
+    ...row,
+    itens: typeof row.itens === "string" ? JSON.parse(row.itens) : (row.itens ?? []),
+  };
+}
 
-    CREATE TABLE IF NOT EXISTS veiculos (
-      id INTEGER PRIMARY KEY,
-      placa TEXT NOT NULL,
-      modelo TEXT NOT NULL,
-      motorista_padrao TEXT,
-      ativo INTEGER NOT NULL DEFAULT 1,
-      km_atual REAL,
-      criado_em TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS rotas (
-      id INTEGER PRIMARY KEY,
-      data TEXT NOT NULL,
-      veiculo_id INTEGER,
-      veiculo_placa TEXT NOT NULL,
-      motorista TEXT NOT NULL,
-      km_saida REAL NOT NULL,
-      km_chegada REAL,
-      hora_saida TEXT NOT NULL,
-      hora_chegada TEXT,
-      status TEXT NOT NULL DEFAULT 'em_andamento',
-      itens TEXT NOT NULL DEFAULT '[]',
-      criado_em TEXT NOT NULL,
-      atualizado_em TEXT NOT NULL
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_rotas_data ON rotas(data);
-
-    CREATE TABLE IF NOT EXISTS jornadas (
-      id INTEGER PRIMARY KEY,
-      data TEXT NOT NULL UNIQUE,
-      hora_inicio TEXT NOT NULL,
-      hora_fim TEXT,
-      motorista TEXT,
-      criado_em TEXT NOT NULL
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_jornadas_data ON jornadas(data);
-
-    CREATE TABLE IF NOT EXISTS descargas (
-      id INTEGER PRIMARY KEY,
-      data TEXT NOT NULL,
-      hora_inicio TEXT NOT NULL,
-      hora_fim TEXT,
-      motoristas_ids TEXT NOT NULL DEFAULT '[]',
-      observacao TEXT,
-      criado_em TEXT NOT NULL
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_descargas_data ON descargas(data);
-  `);
+function parseMotoristas(row: any) {
+  if (!row) return row;
+  return {
+    ...row,
+    motoristas_ids: typeof row.motoristas_ids === "string"
+      ? JSON.parse(row.motoristas_ids)
+      : (row.motoristas_ids ?? []),
+  };
 }
 
 // ── Rotas ────────────────────────────────────────────────────────
 
-export function upsertRota(payload: {
+export async function upsertRota(payload: {
   id: number;
   data: string;
   veiculo_id?: number | null;
@@ -110,70 +42,55 @@ export function upsertRota(payload: {
   criado_em: string;
   atualizado_em?: string;
 }) {
-  const db = getDB();
   const now = new Date().toISOString();
-  db.prepare(`
-    INSERT INTO rotas (id, data, veiculo_id, veiculo_placa, motorista, km_saida, km_chegada, hora_saida, hora_chegada, status, itens, criado_em, atualizado_em)
-    VALUES (@id, @data, @veiculo_id, @veiculo_placa, @motorista, @km_saida, @km_chegada, @hora_saida, @hora_chegada, @status, @itens, @criado_em, @atualizado_em)
-    ON CONFLICT(id) DO UPDATE SET
-      data = excluded.data,
-      veiculo_id = excluded.veiculo_id,
-      veiculo_placa = excluded.veiculo_placa,
-      motorista = excluded.motorista,
-      km_saida = excluded.km_saida,
-      km_chegada = excluded.km_chegada,
-      hora_saida = excluded.hora_saida,
-      hora_chegada = excluded.hora_chegada,
-      status = excluded.status,
-      itens = excluded.itens,
-      atualizado_em = excluded.atualizado_em
-  `).run({
-    ...payload,
-    veiculo_id: payload.veiculo_id ?? null,
-    km_chegada: payload.km_chegada ?? null,
-    hora_chegada: payload.hora_chegada ?? null,
-    itens: JSON.stringify(payload.itens ?? []),
-    atualizado_em: payload.atualizado_em ?? now,
-  });
+  const { data, error } = await sb()
+    .from("rotas")
+    .upsert({
+      ...payload,
+      itens: JSON.stringify(payload.itens ?? []),
+      atualizado_em: payload.atualizado_em ?? now,
+    }, { onConflict: "id" })
+    .select()
+    .single();
 
-  return db.prepare("SELECT * FROM rotas WHERE id = ?").get(payload.id) as RotaRow;
+  if (error) throw error;
+  return parseItens(data);
 }
 
-export function getRotasPorData(data: string): RotaRow[] {
-  const db = getDB();
-  const rows = db.prepare(
-    "SELECT * FROM rotas WHERE data = ? ORDER BY criado_em DESC"
-  ).all(data) as RotaRow[];
-  return rows.map(parseRotaRow);
+export async function getRotasPorData(data: string) {
+  const { data: rows, error } = await sb()
+    .from("rotas")
+    .select("*")
+    .eq("data", data)
+    .order("criado_em", { ascending: false });
+
+  if (error) throw error;
+  return (rows ?? []).map(parseItens);
 }
 
 // ── Cidades ──────────────────────────────────────────────────────
 
-export function upsertCidade(payload: {
+export async function upsertCidade(payload: {
   id: number;
   nome: string;
   uf: string;
   distancia_km?: number | null;
   criado_em: string;
 }) {
-  const db = getDB();
-  db.prepare(`
-    INSERT INTO cidades (id, nome, uf, distancia_km, criado_em)
-    VALUES (@id, @nome, @uf, @distancia_km, @criado_em)
-    ON CONFLICT(id) DO UPDATE SET
-      nome = excluded.nome,
-      uf = excluded.uf,
-      distancia_km = excluded.distancia_km
-  `).run({ ...payload, distancia_km: payload.distancia_km ?? null });
+  const { error } = await sb()
+    .from("cidades")
+    .upsert({ ...payload, distancia_km: payload.distancia_km ?? null }, { onConflict: "id" });
+  if (error) throw error;
 }
 
-export function deletarCidade(id: number) {
-  getDB().prepare("DELETE FROM cidades WHERE id = ?").run(id);
+export async function deletarCidade(id: number) {
+  const { error } = await sb().from("cidades").delete().eq("id", id);
+  if (error) throw error;
 }
 
 // ── Entregadores ─────────────────────────────────────────────────
 
-export function upsertEntregador(payload: {
+export async function upsertEntregador(payload: {
   id: number;
   nome: string;
   telefone: string;
@@ -181,29 +98,24 @@ export function upsertEntregador(payload: {
   ativo: boolean;
   criado_em: string;
 }) {
-  const db = getDB();
-  db.prepare(`
-    INSERT INTO entregadores (id, nome, telefone, cidades_ids, ativo, criado_em)
-    VALUES (@id, @nome, @telefone, @cidades_ids, @ativo, @criado_em)
-    ON CONFLICT(id) DO UPDATE SET
-      nome = excluded.nome,
-      telefone = excluded.telefone,
-      cidades_ids = excluded.cidades_ids,
-      ativo = excluded.ativo
-  `).run({
-    ...payload,
-    cidades_ids: JSON.stringify(payload.cidades_ids),
-    ativo: payload.ativo ? 1 : 0,
-  });
+  const { error } = await sb()
+    .from("entregadores")
+    .upsert({
+      ...payload,
+      cidades_ids: JSON.stringify(payload.cidades_ids),
+      ativo: payload.ativo ? 1 : 0,
+    }, { onConflict: "id" });
+  if (error) throw error;
 }
 
-export function deletarEntregador(id: number) {
-  getDB().prepare("DELETE FROM entregadores WHERE id = ?").run(id);
+export async function deletarEntregador(id: number) {
+  const { error } = await sb().from("entregadores").delete().eq("id", id);
+  if (error) throw error;
 }
 
 // ── Veículos ─────────────────────────────────────────────────────
 
-export function upsertVeiculo(payload: {
+export async function upsertVeiculo(payload: {
   id: number;
   placa: string;
   modelo: string;
@@ -212,31 +124,25 @@ export function upsertVeiculo(payload: {
   km_atual?: number | null;
   criado_em: string;
 }) {
-  const db = getDB();
-  db.prepare(`
-    INSERT INTO veiculos (id, placa, modelo, motorista_padrao, ativo, km_atual, criado_em)
-    VALUES (@id, @placa, @modelo, @motorista_padrao, @ativo, @km_atual, @criado_em)
-    ON CONFLICT(id) DO UPDATE SET
-      placa = excluded.placa,
-      modelo = excluded.modelo,
-      motorista_padrao = excluded.motorista_padrao,
-      ativo = excluded.ativo,
-      km_atual = excluded.km_atual
-  `).run({
-    ...payload,
-    motorista_padrao: payload.motorista_padrao ?? null,
-    km_atual: payload.km_atual ?? null,
-    ativo: payload.ativo ? 1 : 0,
-  });
+  const { error } = await sb()
+    .from("veiculos")
+    .upsert({
+      ...payload,
+      motorista_padrao: payload.motorista_padrao ?? null,
+      km_atual: payload.km_atual ?? null,
+      ativo: payload.ativo ? 1 : 0,
+    }, { onConflict: "id" });
+  if (error) throw error;
 }
 
-export function deletarVeiculo(id: number) {
-  getDB().prepare("DELETE FROM veiculos WHERE id = ?").run(id);
+export async function deletarVeiculo(id: number) {
+  const { error } = await sb().from("veiculos").delete().eq("id", id);
+  if (error) throw error;
 }
 
 // ── Jornadas ─────────────────────────────────────────────────────
 
-export function upsertJornada(payload: {
+export async function upsertJornada(payload: {
   id: number;
   data: string;
   hora_inicio: string;
@@ -244,36 +150,42 @@ export function upsertJornada(payload: {
   motorista?: string | null;
   criado_em: string;
 }) {
-  const db = getDB();
-  db.prepare(`
-    INSERT INTO jornadas (id, data, hora_inicio, hora_fim, motorista, criado_em)
-    VALUES (@id, @data, @hora_inicio, @hora_fim, @motorista, @criado_em)
-    ON CONFLICT(id) DO UPDATE SET
-      hora_inicio = excluded.hora_inicio,
-      hora_fim = excluded.hora_fim,
-      motorista = excluded.motorista
-  `).run({
-    ...payload,
-    hora_fim: payload.hora_fim ?? null,
-    motorista: payload.motorista ?? null,
-  });
+  const { error } = await sb()
+    .from("jornadas")
+    .upsert({
+      ...payload,
+      hora_fim: payload.hora_fim ?? null,
+      motorista: payload.motorista ?? null,
+    }, { onConflict: "id" });
+  if (error) throw error;
 }
 
-export function getJornadasPorData(data: string) {
-  return getDB().prepare("SELECT * FROM jornadas WHERE data = ? ORDER BY hora_inicio").all(data);
+export async function getJornadasPorData(data: string) {
+  const { data: rows, error } = await sb()
+    .from("jornadas")
+    .select("*")
+    .eq("data", data)
+    .order("hora_inicio");
+  if (error) throw error;
+  return rows ?? [];
 }
 
-export function getJornadasRecentes(limite = 30) {
-  const db = getDB();
+export async function getJornadasRecentes(limite = 30) {
   const dataLimite = new Date();
   dataLimite.setDate(dataLimite.getDate() - limite);
   const isoLimite = dataLimite.toISOString().split("T")[0];
-  return db.prepare("SELECT * FROM jornadas WHERE data >= ? ORDER BY data DESC").all(isoLimite);
+  const { data: rows, error } = await sb()
+    .from("jornadas")
+    .select("*")
+    .gte("data", isoLimite)
+    .order("data", { ascending: false });
+  if (error) throw error;
+  return rows ?? [];
 }
 
 // ── Descargas ────────────────────────────────────────────────────
 
-export function upsertDescarga(payload: {
+export async function upsertDescarga(payload: {
   id: number;
   data: string;
   hora_inicio: string;
@@ -282,59 +194,36 @@ export function upsertDescarga(payload: {
   observacao?: string | null;
   criado_em: string;
 }) {
-  const db = getDB();
-  db.prepare(`
-    INSERT INTO descargas (id, data, hora_inicio, hora_fim, motoristas_ids, observacao, criado_em)
-    VALUES (@id, @data, @hora_inicio, @hora_fim, @motoristas_ids, @observacao, @criado_em)
-    ON CONFLICT(id) DO UPDATE SET
-      hora_inicio = excluded.hora_inicio,
-      hora_fim = excluded.hora_fim,
-      motoristas_ids = excluded.motoristas_ids,
-      observacao = excluded.observacao
-  `).run({
-    ...payload,
-    hora_fim: payload.hora_fim ?? null,
-    motoristas_ids: JSON.stringify(payload.motoristas_ids),
-    observacao: payload.observacao ?? null,
-  });
+  const { error } = await sb()
+    .from("descargas")
+    .upsert({
+      ...payload,
+      hora_fim: payload.hora_fim ?? null,
+      motoristas_ids: JSON.stringify(payload.motoristas_ids),
+      observacao: payload.observacao ?? null,
+    }, { onConflict: "id" });
+  if (error) throw error;
 }
 
-export function getDescargasPorData(data: string) {
-  const db = getDB();
-  const rows = db.prepare("SELECT * FROM descargas WHERE data = ? ORDER BY hora_inicio").all(data) as any[];
-  return rows.map((r) => ({ ...r, motoristas_ids: JSON.parse(r.motoristas_ids || "[]") }));
+export async function getDescargasPorData(data: string) {
+  const { data: rows, error } = await sb()
+    .from("descargas")
+    .select("*")
+    .eq("data", data)
+    .order("hora_inicio");
+  if (error) throw error;
+  return (rows ?? []).map(parseMotoristas);
 }
 
-export function getDescargasRecentes(limite = 30) {
-  const db = getDB();
+export async function getDescargasRecentes(limite = 30) {
   const dataLimite = new Date();
   dataLimite.setDate(dataLimite.getDate() - limite);
   const isoLimite = dataLimite.toISOString().split("T")[0];
-  const rows = db.prepare("SELECT * FROM descargas WHERE data >= ? ORDER BY data DESC").all(isoLimite) as any[];
-  return rows.map((r) => ({ ...r, motoristas_ids: JSON.parse(r.motoristas_ids || "[]") }));
-}
-
-// ── Helpers ──────────────────────────────────────────────────────
-
-interface RotaRow {
-  id: number;
-  data: string;
-  veiculo_id: number | null;
-  veiculo_placa: string;
-  motorista: string;
-  km_saida: number;
-  km_chegada: number | null;
-  hora_saida: string;
-  hora_chegada: string | null;
-  status: string;
-  itens: string | unknown[];
-  criado_em: string;
-  atualizado_em: string;
-}
-
-function parseRotaRow(row: RotaRow) {
-  return {
-    ...row,
-    itens: typeof row.itens === "string" ? JSON.parse(row.itens) : row.itens,
-  };
+  const { data: rows, error } = await sb()
+    .from("descargas")
+    .select("*")
+    .gte("data", isoLimite)
+    .order("data", { ascending: false });
+  if (error) throw error;
+  return (rows ?? []).map(parseMotoristas);
 }

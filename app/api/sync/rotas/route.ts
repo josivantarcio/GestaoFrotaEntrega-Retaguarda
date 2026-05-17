@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRotasPorData } from "@/lib/db-server";
 
-export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
@@ -10,6 +9,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Parâmetro ?data=YYYY-MM-DD obrigatório" }, { status: 400 });
   }
 
-  const rotas = getRotasPorData(data);
+  const rotas = await getRotasPorData(data);
   return NextResponse.json(rotas);
 }
