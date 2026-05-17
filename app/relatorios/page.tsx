@@ -6,9 +6,10 @@ import Link from "next/link";
 import {
   BarChart2, Package, AlertTriangle, CheckCircle2, Truck,
   Download, Search, ChevronDown, ChevronUp, FileText, Users,
+  Clock, PackageOpen,
 } from "lucide-react";
 import { NavBar } from "@/components/layout/NavBar";
-import type { Rota, ItemRota, Ocorrencia } from "@/lib/types";
+import type { Rota, ItemRota, Ocorrencia, Jornada, Descarga } from "@/lib/types";
 import { LABELS_OCORRENCIA } from "@/lib/types";
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -32,9 +33,25 @@ function kmTotal(rota: Rota): number {
   return 0;
 }
 
-type Aba = "rotas" | "ocorrencias" | "exportar";
+function calcularDuracaoMin(inicio: string, fim: string): number {
+  const [hi, mi] = inicio.split(":").map(Number);
+  const [hf, mf] = fim.split(":").map(Number);
+  if (isNaN(hi) || isNaN(hf)) return 0;
+  let diff = hf * 60 + mf - (hi * 60 + mi);
+  if (diff < 0) diff += 24 * 60;
+  return diff;
+}
 
-// ── Exportação CSV ────────────────────────────────────────────
+function formatarDuracao(min: number): string {
+  if (min <= 0) return "—";
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return h > 0 ? `${h}h ${m < 10 ? "0" : ""}${m}min` : `${m}min`;
+}
+
+type Aba = "rotas" | "ocorrencias" | "jornadas" | "exportar";
+
+// ── CSV ───────────────────────────────────────────────────────
 function gerarCSVRotas(rotas: Rota[]): string {
   const linhas: string[][] = [
     ["Data", "Motorista", "Veículo", "KM Saída", "KM Chegada", "KM Rodados", "Hora Saída", "Hora Chegada", "Status", "Cidades", "Volumes Saída", "Volumes Entregues", "Ocorrências"],
@@ -69,6 +86,34 @@ function gerarCSVOcorrencias(rotas: Rota[]): string {
         ]);
       }
     }
+  }
+  return linhas.map((l) => l.map((c) => `"${c.replace(/"/g, '""')}"`).join(",")).join("\n");
+}
+
+function gerarCSVJornadas(jornadas: Jornada[]): string {
+  const linhas: string[][] = [
+    ["Data", "Motorista", "Hora Início", "Hora Fim", "Duração", "Status"],
+  ];
+  for (const j of jornadas) {
+    const dur = j.hora_fim ? formatarDuracao(calcularDuracaoMin(j.hora_inicio, j.hora_fim)) : "Em andamento";
+    linhas.push([
+      dataBR(j.data), j.motorista ?? "", j.hora_inicio, j.hora_fim ?? "", dur,
+      j.hora_fim ? "Encerrada" : "Em andamento",
+    ]);
+  }
+  return linhas.map((l) => l.map((c) => `"${c.replace(/"/g, '""')}"`).join(",")).join("\n");
+}
+
+function gerarCSVDescargas(descargas: Descarga[]): string {
+  const linhas: string[][] = [
+    ["Data", "Hora Início", "Hora Fim", "Duração", "Observação", "Status"],
+  ];
+  for (const d of descargas) {
+    const dur = d.hora_fim ? formatarDuracao(calcularDuracaoMin(d.hora_inicio, d.hora_fim)) : "Em andamento";
+    linhas.push([
+      dataBR(d.data), d.hora_inicio, d.hora_fim ?? "", dur,
+      d.observacao ?? "", d.hora_fim ? "Concluída" : "Em andamento",
+    ]);
   }
   return linhas.map((l) => l.map((c) => `"${c.replace(/"/g, '""')}"`).join(",")).join("\n");
 }
@@ -166,6 +211,7 @@ function RotaCardHistorico({ rota }: { rota: Rota }) {
                       {ite_ocs.map((oc, i) => (
                         <span key={i} className="text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full">
                           {LABELS_OCORRENCIA[oc.tipo] ?? oc.tipo}{oc.quantidade > 1 ? ` ×${oc.quantidade}` : ""}
+                          {oc.descricao ? ` — ${oc.descricao}` : ""}
                         </span>
                       ))}
                     </div>
@@ -213,7 +259,6 @@ function AbaOcorrencias({ rotas }: { rotas: Rota[] }) {
 
   return (
     <div className="space-y-4">
-      {/* Ranking por tipo */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
         <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Ranking por tipo</p>
         <div className="space-y-2">
@@ -232,7 +277,6 @@ function AbaOcorrencias({ rotas }: { rotas: Rota[] }) {
         </div>
       </div>
 
-      {/* Lista detalhada */}
       <div className="space-y-2">
         {todas.map((oc, idx) => (
           <div key={idx} className="bg-white rounded-xl border border-amber-100 shadow-sm px-4 py-3 flex items-start gap-3">
@@ -257,8 +301,142 @@ function AbaOcorrencias({ rotas }: { rotas: Rota[] }) {
   );
 }
 
+// ── Aba Jornadas & Descargas ──────────────────────────────────
+function AbaJornadas({ jornadas, descargas }: { jornadas: Jornada[]; descargas: Descarga[] }) {
+  // Agrupa por data para exibir dia a dia
+  const porData = useMemo(() => {
+    const mapa: Record<string, { jornadas: Jornada[]; descargas: Descarga[] }> = {};
+    for (const j of jornadas) {
+      if (!mapa[j.data]) mapa[j.data] = { jornadas: [], descargas: [] };
+      mapa[j.data].jornadas.push(j);
+    }
+    for (const d of descargas) {
+      if (!mapa[d.data]) mapa[d.data] = { jornadas: [], descargas: [] };
+      mapa[d.data].descargas.push(d);
+    }
+    return Object.entries(mapa).sort((a, b) => b[0].localeCompare(a[0]));
+  }, [jornadas, descargas]);
+
+  // KPIs de jornada
+  const jornadasComFim = jornadas.filter((j) => j.hora_fim);
+  const totalMinJornadas = jornadasComFim.reduce((s, j) => s + calcularDuracaoMin(j.hora_inicio, j.hora_fim!), 0);
+  const mediaMinJornada = jornadasComFim.length > 0 ? Math.round(totalMinJornadas / jornadasComFim.length) : 0;
+
+  const descargasComFim = descargas.filter((d) => d.hora_fim);
+  const totalMinDescargas = descargasComFim.reduce((s, d) => s + calcularDuracaoMin(d.hora_inicio, d.hora_fim!), 0);
+
+  if (jornadas.length === 0 && descargas.length === 0) {
+    return (
+      <div className="text-center py-16">
+        <Clock size={40} className="text-gray-200 mx-auto mb-3" />
+        <p className="text-gray-400 font-medium">Nenhuma jornada ou descarga no período</p>
+        <p className="text-gray-300 text-sm mt-1">Os registros são enviados pelo app RotaFácil</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* KPIs de jornada */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <KpiCard
+          icone={<Clock size={18} className="text-blue-600" />}
+          titulo="Jornadas"
+          valor={jornadas.length}
+          sub={`${jornadasComFim.length} encerradas`}
+        />
+        <KpiCard
+          icone={<Clock size={18} className="text-purple-600" />}
+          titulo="Média jornada"
+          valor={mediaMinJornada > 0 ? formatarDuracao(mediaMinJornada) : "—"}
+          sub="tempo médio"
+        />
+        <KpiCard
+          icone={<PackageOpen size={18} className="text-amber-600" />}
+          titulo="Descargas"
+          valor={descargas.length}
+          sub={`${descargasComFim.length} concluídas`}
+        />
+        <KpiCard
+          icone={<PackageOpen size={18} className="text-green-600" />}
+          titulo="Tempo descargas"
+          valor={totalMinDescargas > 0 ? formatarDuracao(totalMinDescargas) : "—"}
+          sub="total no período"
+        />
+      </div>
+
+      {/* Registros por dia */}
+      {porData.map(([data, { jornadas: js, descargas: ds }]) => (
+        <div key={data} className="space-y-2">
+          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest px-1">
+            {dataBR(data)} — {new Date(data + "T12:00:00").toLocaleDateString("pt-BR", { weekday: "long" })}
+          </p>
+
+          {/* Jornadas do dia */}
+          {js.map((j) => {
+            const dur = j.hora_fim ? calcularDuracaoMin(j.hora_inicio, j.hora_fim) : null;
+            const aberta = !j.hora_fim;
+            return (
+              <div key={j.id} className={`bg-white rounded-xl border shadow-sm px-4 py-3 flex items-start gap-3 ${aberta ? "border-blue-200" : "border-gray-100"}`}>
+                <div className={`mt-0.5 rounded-full p-1.5 flex-shrink-0 ${aberta ? "bg-blue-50" : "bg-gray-50"}`}>
+                  <Clock size={14} className={aberta ? "text-blue-600" : "text-gray-400"} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-semibold text-gray-800">Jornada</span>
+                    {j.motorista && <span className="text-xs text-gray-500">{j.motorista}</span>}
+                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${aberta ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-500"}`}>
+                      {aberta ? "em andamento" : "encerrada"}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3 mt-1 text-xs text-gray-400 flex-wrap">
+                    <span>{j.hora_inicio}{j.hora_fim ? ` → ${j.hora_fim}` : " → em andamento"}</span>
+                    {dur !== null && dur > 0 && (
+                      <span className="font-semibold text-gray-600">{formatarDuracao(dur)}</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Descargas do dia */}
+          {ds.map((d) => {
+            const dur = d.hora_fim ? calcularDuracaoMin(d.hora_inicio, d.hora_fim) : null;
+            const aberta = !d.hora_fim;
+            return (
+              <div key={d.id} className={`bg-white rounded-xl border shadow-sm px-4 py-3 flex items-start gap-3 ${aberta ? "border-amber-200" : "border-gray-100"}`}>
+                <div className={`mt-0.5 rounded-full p-1.5 flex-shrink-0 ${aberta ? "bg-amber-50" : "bg-gray-50"}`}>
+                  <PackageOpen size={14} className={aberta ? "text-amber-600" : "text-gray-400"} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-semibold text-gray-800">Descarga</span>
+                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${aberta ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-500"}`}>
+                      {aberta ? "em andamento" : "concluída"}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3 mt-1 text-xs text-gray-400 flex-wrap">
+                    <span>{d.hora_inicio}{d.hora_fim ? ` → ${d.hora_fim}` : " → em andamento"}</span>
+                    {dur !== null && dur > 0 && (
+                      <span className="font-semibold text-gray-600">{formatarDuracao(dur)}</span>
+                    )}
+                    {d.observacao && <span className="italic text-gray-400">"{d.observacao}"</span>}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── Aba Exportar ──────────────────────────────────────────────
-function AbaExportar({ rotas, inicio, fim }: { rotas: Rota[]; inicio: string; fim: string }) {
+function AbaExportar({ rotas, jornadas, descargas, inicio, fim }: {
+  rotas: Rota[]; jornadas: Jornada[]; descargas: Descarga[]; inicio: string; fim: string;
+}) {
   const periodo = `${inicio}_${fim}`;
   return (
     <div className="space-y-4">
@@ -268,7 +446,7 @@ function AbaExportar({ rotas, inicio, fim }: { rotas: Rota[]; inicio: string; fi
           <p className="font-semibold text-gray-800">Exportar dados do período</p>
         </div>
         <p className="text-sm text-gray-500">
-          {rotas.length} rota{rotas.length !== 1 ? "s" : ""} · {dataBR(inicio)} a {dataBR(fim)}
+          {rotas.length} rota{rotas.length !== 1 ? "s" : ""} · {jornadas.length} jornada{jornadas.length !== 1 ? "s" : ""} · {descargas.length} descarga{descargas.length !== 1 ? "s" : ""} · {dataBR(inicio)} a {dataBR(fim)}
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -295,8 +473,47 @@ function AbaExportar({ rotas, inicio, fim }: { rotas: Rota[]; inicio: string; fi
               <p className="text-xs text-amber-500 mt-0.5">CSV com cada ocorrência, tipo, motorista e cidade</p>
             </div>
           </button>
+
+          <button
+            onClick={() => baixarCSV(gerarCSVJornadas(jornadas), `jornadas_${periodo}.csv`)}
+            disabled={jornadas.length === 0}
+            className="flex items-center gap-3 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-xl p-4 text-left transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Download size={18} className="text-purple-600 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-purple-800">Jornadas</p>
+              <p className="text-xs text-purple-500 mt-0.5">CSV com horários de início e fim de cada jornada</p>
+            </div>
+          </button>
+
+          <button
+            onClick={() => baixarCSV(gerarCSVDescargas(descargas), `descargas_${periodo}.csv`)}
+            disabled={descargas.length === 0}
+            className="flex items-center gap-3 bg-green-50 hover:bg-green-100 border border-green-200 rounded-xl p-4 text-left transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Download size={18} className="text-green-600 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-green-800">Descargas</p>
+              <p className="text-xs text-green-500 mt-0.5">CSV com horários e observações de cada descarga</p>
+            </div>
+          </button>
         </div>
       </div>
+
+      {/* Link para relatório de entregadores */}
+      <Link
+        href="/relatorios/entregadores"
+        className="flex items-center gap-3 bg-white hover:bg-gray-50 border border-gray-100 rounded-xl p-4 transition-colors shadow-sm"
+      >
+        <div className="bg-blue-50 rounded-lg p-2">
+          <Users size={18} className="text-blue-600" />
+        </div>
+        <div className="flex-1">
+          <p className="text-sm font-semibold text-gray-800">Relatório por Entregador</p>
+          <p className="text-xs text-gray-400 mt-0.5">Taxa de entrega, volumes, ocorrências e desempenho individual</p>
+        </div>
+        <ChevronDown size={14} className="text-gray-300 -rotate-90" />
+      </Link>
     </div>
   );
 }
@@ -306,6 +523,8 @@ export default function RelatoriosPage() {
   const [inicio, setInicio] = useState(inicioDeMes());
   const [fim, setFim] = useState(hoje());
   const [rotas, setRotas] = useState<Rota[]>([]);
+  const [jornadas, setJornadas] = useState<Jornada[]>([]);
+  const [descargas, setDescargas] = useState<Descarga[]>([]);
   const [carregando, setCarregando] = useState(false);
   const [buscado, setBuscado] = useState(false);
   const [aba, setAba] = useState<Aba>("rotas");
@@ -314,15 +533,21 @@ export default function RelatoriosPage() {
     if (!inicio || !fim) return;
     setCarregando(true);
     try {
-      const res = await fetch(`/api/relatorios/rotas?inicio=${inicio}&fim=${fim}`);
-      if (res.ok) setRotas(await res.json());
+      const [resRotas, resJornadas, resDescargas] = await Promise.all([
+        fetch(`/api/relatorios/rotas?inicio=${inicio}&fim=${fim}`),
+        fetch(`/api/relatorios/jornadas?inicio=${inicio}&fim=${fim}`),
+        fetch(`/api/relatorios/descargas?inicio=${inicio}&fim=${fim}`),
+      ]);
+      if (resRotas.ok) setRotas(await resRotas.json());
+      if (resJornadas.ok) setJornadas(await resJornadas.json());
+      if (resDescargas.ok) setDescargas(await resDescargas.json());
     } finally {
       setCarregando(false);
       setBuscado(true);
     }
   }, [inicio, fim]);
 
-  // KPIs
+  // KPIs de rotas
   const totalRotas = rotas.length;
   const concluidas = rotas.filter((r) => r.status === "concluida").length;
   const totalVolumes = rotas.reduce((s, r) => s + r.itens.reduce((si, i) => si + i.volumesSaida, 0), 0);
@@ -330,6 +555,13 @@ export default function RelatoriosPage() {
   const totalOcs = rotas.reduce((s, r) => s + r.itens.reduce((si, i) => si + (i.ocorrencias?.length ?? 0), 0), 0);
   const totalKm = rotas.reduce((s, r) => s + kmTotal(r), 0);
   const taxaEntrega = totalVolumes > 0 ? Math.round((totalEntregues / totalVolumes) * 100) : 0;
+
+  const ABAS: { id: Aba; label: string; count?: number }[] = [
+    { id: "rotas", label: `Rotas (${totalRotas})` },
+    { id: "ocorrencias", label: `Ocorrências (${totalOcs})` },
+    { id: "jornadas", label: `Jornadas & Descargas (${jornadas.length + descargas.length})` },
+    { id: "exportar", label: "Exportar" },
+  ];
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
@@ -373,7 +605,7 @@ export default function RelatoriosPage() {
           </div>
         </div>
 
-        {/* KPIs */}
+        {/* KPIs de rotas */}
         {buscado && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <KpiCard icone={<Truck size={18} className="text-blue-600" />} titulo="Rotas" valor={totalRotas} sub={`${concluidas} concluída${concluidas !== 1 ? "s" : ""}`} />
@@ -386,16 +618,16 @@ export default function RelatoriosPage() {
         {/* Tabs */}
         {buscado && (
           <>
-            <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
-              {(["rotas", "ocorrencias", "exportar"] as Aba[]).map((tab) => (
+            <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit flex-wrap">
+              {ABAS.map((tab) => (
                 <button
-                  key={tab}
-                  onClick={() => setAba(tab)}
+                  key={tab.id}
+                  onClick={() => setAba(tab.id)}
                   className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors ${
-                    aba === tab ? "bg-white shadow-sm text-gray-800" : "text-gray-400 hover:text-gray-600"
+                    aba === tab.id ? "bg-white shadow-sm text-gray-800" : "text-gray-400 hover:text-gray-600"
                   }`}
                 >
-                  {tab === "rotas" ? `Rotas (${totalRotas})` : tab === "ocorrencias" ? `Ocorrências (${totalOcs})` : "Exportar CSV"}
+                  {tab.label}
                 </button>
               ))}
             </div>
@@ -414,7 +646,8 @@ export default function RelatoriosPage() {
                 )
               )}
               {aba === "ocorrencias" && <AbaOcorrencias rotas={rotas} />}
-              {aba === "exportar" && <AbaExportar rotas={rotas} inicio={inicio} fim={fim} />}
+              {aba === "jornadas" && <AbaJornadas jornadas={jornadas} descargas={descargas} />}
+              {aba === "exportar" && <AbaExportar rotas={rotas} jornadas={jornadas} descargas={descargas} inicio={inicio} fim={fim} />}
             </div>
           </>
         )}
