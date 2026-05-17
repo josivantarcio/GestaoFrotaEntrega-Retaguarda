@@ -23,7 +23,6 @@ interface PosicaoGPS {
   status: string;
 }
 
-// Hook que mantém as últimas posições GPS de todos os motoristas ativos
 function usePosicoes(rotaIds: string[]) {
   const [posicoes, setPosicoes] = useState<Map<string, PosicaoGPS>>(new Map());
 
@@ -31,7 +30,6 @@ function usePosicoes(rotaIds: string[]) {
     if (!SUPABASE_URL || !SUPABASE_ANON_KEY || rotaIds.length === 0) return;
     const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-    // Carrega últimas posições de todos os IDs
     supabase
       .from("localizacoes")
       .select("*")
@@ -40,14 +38,12 @@ function usePosicoes(rotaIds: string[]) {
       .then(({ data }) => {
         if (!data) return;
         const mapa = new Map<string, PosicaoGPS>();
-        // Fica com a mais recente de cada rota_id
         for (const row of data) {
           if (!mapa.has(row.rota_id)) mapa.set(row.rota_id, row as PosicaoGPS);
         }
         setPosicoes(mapa);
       });
 
-    // Escuta inserções em tempo real
     const canal = supabase
       .channel("mapa-geral-gps")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "localizacoes" }, (p) => {
@@ -86,11 +82,11 @@ function hoje() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-function corStatus(rota: Rota): { bg: string; text: string; badge: string } {
-  if (rota.status === "concluida") return { bg: "#f0fdf4", text: "#15803d", badge: "bg-green-100 text-green-700" };
+function corStatus(rota: Rota): { bg: string; text: string; badge: string; hex: string } {
+  if (rota.status === "concluida") return { bg: "#f0fdf4", text: "#15803d", badge: "bg-green-100 text-green-700", hex: "#16a34a" };
   const temOco = rota.itens.some((i) => (i.ocorrencias?.length ?? 0) > 0);
-  if (temOco) return { bg: "#fffbeb", text: "#b45309", badge: "bg-amber-100 text-amber-700" };
-  return { bg: "#eff6ff", text: "#1d4ed8", badge: "bg-blue-100 text-blue-700" };
+  if (temOco) return { bg: "#fffbeb", text: "#b45309", badge: "bg-amber-100 text-amber-700", hex: "#d97706" };
+  return { bg: "#eff6ff", text: "#1d4ed8", badge: "bg-blue-100 text-blue-700", hex: "#0d47a1" };
 }
 
 function labelStatus(rota: Rota): string {
@@ -117,24 +113,164 @@ function cidadeAtual(rota: Rota): string {
   return "Em rota";
 }
 
-function mapsUrlCidade(cidade: string, uf?: string): string {
-  const q = encodeURIComponent(uf ? `${cidade}, ${uf}, Brasil` : `${cidade}, Brasil`);
+function mapsUrlCidade(cidade: string): string {
+  const q = encodeURIComponent(`${cidade}, Brasil`);
   return `https://www.google.com/maps/search/${q}`;
 }
 
-function mapsEmbedMultiplo(rotas: Rota[]): string {
-  // Monta URL de embed com a primeira cidade ativa como centro
-  // Google Maps embed gratuito suporta apenas uma query, então centramos na cidade mais relevante
-  const rotasAtivas = rotas.filter((r) => r.status !== "concluida");
-  const referencia = rotasAtivas[0] ?? rotas[0];
-  if (!referencia) return "";
-  const prox = proximaCidade(referencia) ?? ultimaCidadeConcluida(referencia);
-  const cidade = prox?.cidadeNome ?? referencia.motorista;
-  const q = encodeURIComponent(`${cidade}, Brasil`);
-  return `https://maps.google.com/maps?q=${q}&z=9&output=embed`;
+function gerarSessionId(data: string, placa: string, horaSaida: string, rotaId: number): string {
+  const d = data.replace(/-/g, "");
+  const p = placa.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+  const h = horaSaida.replace(":", "");
+  return `${d}-${p}-${h}-R${rotaId}`;
 }
 
-// ── Card lateral de cada motorista ──────────────────────────
+// SVG do marcador de carrinho para usar no Leaflet
+function svgCarrinho(cor: string): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">
+    <circle cx="20" cy="20" r="18" fill="${cor}" stroke="white" stroke-width="2.5"/>
+    <g transform="translate(8,10)" stroke="white" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 13H2a1.5 1.5 0 0 1-1.5-1.5V3A1.5 1.5 0 0 1 2 1.5h8.5a1.5 1.5 0 0 1 1.5 1.5v2.25"/>
+      <rect x="7" y="8.25" width="10.5" height="7.5" rx="1.5"/>
+      <circle cx="9" cy="15.75" r="0.75"/>
+      <circle cx="15" cy="15.75" r="0.75"/>
+    </g>
+  </svg>`;
+}
+
+// Componente do mapa Leaflet
+function MapaLeaflet({
+  posicoes,
+  rotas,
+  rotaSelecionadaId,
+  sessionParaRota,
+}: {
+  posicoes: Map<string, PosicaoGPS>;
+  rotas: Rota[];
+  rotaSelecionadaId: number | null;
+  sessionParaRota: Map<string, Rota>;
+}) {
+  const mapRef = useRef<any>(null);
+  const markerMapRef = useRef<Map<string, any>>(new Map());
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Inicializa o mapa uma única vez
+  useEffect(() => {
+    if (typeof window === "undefined" || mapRef.current || !containerRef.current) return;
+
+    import("leaflet").then((L) => {
+      // Corrige ícone padrão quebrado no Next.js
+      delete (L.Icon.Default.prototype as any)._getIconUrl;
+      L.Icon.Default.mergeOptions({
+        iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
+        iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+        shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+      });
+
+      const map = L.map(containerRef.current!, {
+        center: [-14.235, -51.925],
+        zoom: 5,
+        zoomControl: true,
+        attributionControl: false,
+      });
+
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+      }).addTo(map);
+
+      L.control.attribution({ prefix: false }).addTo(map);
+
+      mapRef.current = map;
+    });
+
+    return () => {
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+        markerMapRef.current.clear();
+      }
+    };
+  }, []);
+
+  // Atualiza marcadores quando posições mudam
+  useEffect(() => {
+    if (!mapRef.current || typeof window === "undefined") return;
+
+    import("leaflet").then((L) => {
+      const map = mapRef.current;
+      if (!map) return;
+
+      const idsAtivos = new Set<string>();
+
+      posicoes.forEach((pos, sessionId) => {
+        idsAtivos.add(sessionId);
+        const rotaDoMarker = sessionParaRota.get(sessionId);
+        const cor = rotaDoMarker ? corStatus(rotaDoMarker).hex : "#0d47a1";
+        const latLng: [number, number] = [pos.lat, pos.lng];
+
+        if (markerMapRef.current.has(sessionId)) {
+          // Move o marcador existente suavemente
+          markerMapRef.current.get(sessionId).setLatLng(latLng);
+        } else {
+          // Cria novo marcador com ícone de carrinho
+          const icon = L.divIcon({
+            html: svgCarrinho(cor),
+            className: "",
+            iconSize: [40, 40],
+            iconAnchor: [20, 20],
+            popupAnchor: [0, -22],
+          });
+
+          const label = rotaDoMarker
+            ? `<b>${rotaDoMarker.motorista}</b><br/>${rotaDoMarker.veiculo_placa}<br/>${cidadeAtual(rotaDoMarker)}`
+            : sessionId;
+
+          const marker = L.marker(latLng, { icon })
+            .addTo(map)
+            .bindPopup(label);
+
+          markerMapRef.current.set(sessionId, marker);
+        }
+
+        // Atualiza popup com velocidade
+        if (rotaDoMarker) {
+          const vel = pos.velocidade != null && pos.velocidade > 0
+            ? `<br/><span style="color:#16a34a;font-size:11px">● ${Math.round(pos.velocidade * 3.6)} km/h</span>`
+            : "";
+          markerMapRef.current.get(sessionId)?.setPopupContent(
+            `<b>${rotaDoMarker.motorista}</b><br/>${rotaDoMarker.veiculo_placa}<br/>${cidadeAtual(rotaDoMarker)}${vel}`
+          );
+        }
+      });
+
+      // Remove marcadores de rotas que saíram
+      markerMapRef.current.forEach((marker, sid) => {
+        if (!idsAtivos.has(sid)) {
+          marker.remove();
+          markerMapRef.current.delete(sid);
+        }
+      });
+    });
+  }, [posicoes, sessionParaRota]);
+
+  // Centraliza no motorista selecionado
+  useEffect(() => {
+    if (!mapRef.current || rotaSelecionadaId === null) return;
+
+    const rota = rotas.find((r) => r.id === rotaSelecionadaId);
+    if (!rota || !rota.hora_saida) return;
+    const sid = gerarSessionId(rota.data, rota.veiculo_placa, rota.hora_saida, rota.id);
+    const pos = posicoes.get(sid);
+    if (pos) {
+      mapRef.current.flyTo([pos.lat, pos.lng], 14, { animate: true, duration: 1 });
+      markerMapRef.current.get(sid)?.openPopup();
+    }
+  }, [rotaSelecionadaId, posicoes, rotas]);
+
+  return <div ref={containerRef} style={{ width: "100%", height: "100%" }} />;
+}
+
+// Card lateral de cada motorista
 function MotoristaCard({ rota, selecionado, onSelecionar, posicao }: {
   rota: Rota;
   selecionado: boolean;
@@ -155,10 +291,7 @@ function MotoristaCard({ rota, selecionado, onSelecionar, posicao }: {
       } bg-white shadow-sm`}
     >
       <div className="flex items-start gap-2">
-        <div
-          className="mt-0.5 rounded-lg p-1.5 flex-shrink-0"
-          style={{ backgroundColor: cor.bg }}
-        >
+        <div className="mt-0.5 rounded-lg p-1.5 flex-shrink-0" style={{ backgroundColor: cor.bg }}>
           <IconeTruck size={14} color={cor.text} />
         </div>
         <div className="flex-1 min-w-0">
@@ -179,14 +312,10 @@ function MotoristaCard({ rota, selecionado, onSelecionar, posicao }: {
           </div>
           <p className="text-xs text-gray-500 mt-1 truncate">{cidadeAtual(rota)}</p>
 
-          {/* Barra de progresso */}
           <div className="mt-2 h-1.5 bg-gray-100 rounded-full overflow-hidden">
             <div
               className="h-full rounded-full transition-all duration-700"
-              style={{
-                width: `${progresso}%`,
-                backgroundColor: rota.status === "concluida" ? "#16a34a" : "#0d47a1",
-              }}
+              style={{ width: `${progresso}%`, backgroundColor: rota.status === "concluida" ? "#16a34a" : "#0d47a1" }}
             />
           </div>
 
@@ -212,7 +341,6 @@ function MotoristaCard({ rota, selecionado, onSelecionar, posicao }: {
   );
 }
 
-// ── Painel de detalhe da rota selecionada ──────────────────
 function PainelDetalhe({ rota }: { rota: Rota }) {
   const volumesSaida = rota.itens.reduce((s, i) => s + i.volumesSaida, 0);
   const volumesEntregues = rota.itens.reduce((s, i) => s + (i.volumesEntregues ?? (i.concluido ? i.volumesSaida : 0)), 0);
@@ -239,9 +367,7 @@ function PainelDetalhe({ rota }: { rota: Rota }) {
             rel="noopener noreferrer"
             className="flex items-center gap-2 rounded-lg px-2.5 py-2 hover:bg-gray-50 transition-colors group"
           >
-            <div className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${
-              item.concluido ? "bg-green-100" : "bg-gray-100"
-            }`}>
+            <div className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${item.concluido ? "bg-green-100" : "bg-gray-100"}`}>
               {item.concluido
                 ? <CheckCircle2 size={12} className="text-green-600" />
                 : <IconeTruck size={11} color="#9ca3af" />
@@ -253,9 +379,7 @@ function PainelDetalhe({ rota }: { rota: Rota }) {
               </p>
               <p className="text-xs text-gray-400">{item.entregadorNome} · {item.volumesSaida} vol.</p>
             </div>
-            {(item.ocorrencias?.length ?? 0) > 0 && (
-              <AlertTriangle size={11} className="text-amber-500 flex-shrink-0" />
-            )}
+            {(item.ocorrencias?.length ?? 0) > 0 && <AlertTriangle size={11} className="text-amber-500 flex-shrink-0" />}
             <IconeMapPin size={11} color="#d1d5db" />
           </a>
         ))}
@@ -264,20 +388,21 @@ function PainelDetalhe({ rota }: { rota: Rota }) {
   );
 }
 
-// Gera o sessionId do Supabase a partir dos dados da rota (mesmo algoritmo do app mobile)
-function gerarSessionId(data: string, placa: string, horaSaida: string, rotaId: number): string {
-  const d = data.replace(/-/g, "");
-  const p = placa.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
-  const h = horaSaida.replace(":", "");
-  return `${d}-${p}-${h}-R${rotaId}`;
-}
-
-// ── Página principal ────────────────────────────────────────
 export default function MapaGeralPage() {
   const dataHoje = hoje();
   const [rotaSelecionadaId, setRotaSelecionadaId] = useState<number | null>(null);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
-  const iframeSrcRef = useRef<string>("");
+  const [leafletCss, setLeafletCss] = useState(false);
+
+  // Carrega CSS do Leaflet no cliente
+  useEffect(() => {
+    if (typeof window !== "undefined" && !leafletCss) {
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+      document.head.appendChild(link);
+      setLeafletCss(true);
+    }
+  }, []);
 
   const handleEvento = useCallback((_: EventoNotificacao) => {}, []);
   const { rotas, conectado, carregando } = useRotasRealtime({ dataFiltro: dataHoje, onEvento: handleEvento });
@@ -286,7 +411,6 @@ export default function MapaGeralPage() {
   const concluidas = useMemo(() => rotas.filter((r) => r.status === "concluida"), [rotas]);
   const rotaSelecionada = useMemo(() => rotas.find((r) => r.id === rotaSelecionadaId) ?? null, [rotas, rotaSelecionadaId]);
 
-  // Monta mapa de sessionId → rotaId para as rotas em andamento
   const sessionIds = useMemo(() =>
     rotas
       .filter((r) => r.status === "em_andamento" && r.hora_saida && r.id)
@@ -294,7 +418,6 @@ export default function MapaGeralPage() {
     [rotas]
   );
 
-  // Mapa sessionId → rota para lookup rápido
   const sessionParaRota = useMemo(() => {
     const m = new Map<string, Rota>();
     rotas.filter((r) => r.status === "em_andamento" && r.hora_saida && r.id).forEach((r) => {
@@ -303,47 +426,13 @@ export default function MapaGeralPage() {
     return m;
   }, [rotas]);
 
-  // Posições GPS em tempo real
   const posicoes = usePosicoes(sessionIds);
-
-  // sessionId da rota selecionada
-  const sessionSelecionada = useMemo(() => {
-    if (!rotaSelecionada || !rotaSelecionada.hora_saida) return null;
-    return gerarSessionId(rotaSelecionada.data, rotaSelecionada.veiculo_placa, rotaSelecionada.hora_saida, rotaSelecionada.id);
-  }, [rotaSelecionada]);
-
-  const posicaoSelecionada = sessionSelecionada ? posicoes.get(sessionSelecionada) ?? null : null;
-
-  // URL do mapa: se tiver GPS real usa lat/lng, senão fallback para cidade
-  const embedUrl = useMemo(() => {
-    if (posicaoSelecionada) {
-      return `https://maps.google.com/maps?q=${posicaoSelecionada.lat},${posicaoSelecionada.lng}&z=14&output=embed`;
-    }
-    if (rotaSelecionada) {
-      const prox = proximaCidade(rotaSelecionada) ?? ultimaCidadeConcluida(rotaSelecionada);
-      if (prox) {
-        const q = encodeURIComponent(`${prox.cidadeNome}, Brasil`);
-        return `https://maps.google.com/maps?q=${q}&z=11&output=embed`;
-      }
-    }
-    // Fallback: primeiro motorista com GPS ou primeira cidade
-    const primeiroPosicao = posicoes.size > 0 ? [...posicoes.values()][0] : null;
-    if (primeiroPosicao) {
-      return `https://maps.google.com/maps?q=${primeiroPosicao.lat},${primeiroPosicao.lng}&z=11&output=embed`;
-    }
-    return mapsEmbedMultiplo(rotas);
-  }, [posicaoSelecionada, rotaSelecionada, posicoes, rotas]);
-
-  useEffect(() => {
-    if (!embedUrl || embedUrl === iframeSrcRef.current) return;
-    iframeSrcRef.current = embedUrl;
-    if (iframeRef.current) iframeRef.current.src = embedUrl;
-  }, [embedUrl]);
 
   return (
     <div className="h-screen flex flex-col bg-gray-50 overflow-hidden">
       <NavBar />
-      {/* Sub-header com status ao vivo */}
+
+      {/* Sub-header */}
       <div className="bg-[#0d47a1]/90 text-white px-5 py-1.5 flex items-center justify-between text-xs flex-shrink-0 border-t border-white/10">
         <span className="text-blue-200">{emAndamento.length} em rota · {concluidas.length} concluída{concluidas.length !== 1 ? "s" : ""}</span>
         <div className="flex items-center gap-3">
@@ -423,19 +512,19 @@ export default function MapaGeralPage() {
           )}
         </aside>
 
-        {/* Mapa */}
-        <main className="flex-1 relative bg-gray-200">
-          <iframe
-            ref={iframeRef}
-            width="100%"
-            height="100%"
-            style={{ border: "none", display: "block" }}
-            allowFullScreen
-            loading="lazy"
-            referrerPolicy="no-referrer-when-downgrade"
-          />
+        {/* Mapa Leaflet */}
+        <main className="flex-1 relative">
+          {leafletCss && (
+            <MapaLeaflet
+              posicoes={posicoes}
+              rotas={rotas}
+              rotaSelecionadaId={rotaSelecionadaId}
+              sessionParaRota={sessionParaRota}
+            />
+          )}
+
           {rotas.length === 0 && !carregando && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-100">
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-100 z-10">
               <div className="mb-3 flex items-center justify-center w-20 h-20 rounded-3xl bg-gray-200"><IconeTruck size={40} color="#d1d5db" /></div>
               <p className="text-gray-400 font-medium">Nenhuma rota para exibir</p>
             </div>
@@ -443,12 +532,24 @@ export default function MapaGeralPage() {
 
           {/* Legenda flutuante */}
           {rotas.length > 0 && (
-            <div className="absolute bottom-4 right-4 bg-white rounded-xl shadow-lg border border-gray-100 p-3 space-y-1.5 text-xs">
+            <div className="absolute bottom-4 right-4 bg-white rounded-xl shadow-lg border border-gray-100 p-3 space-y-1.5 text-xs z-[1000]">
               <p className="font-semibold text-gray-600 mb-2">Legenda</p>
-              <div className="flex items-center gap-2"><div className="flex items-center justify-center w-5 h-5 rounded bg-blue-100"><IconeTruck size={12} color="#1d4ed8" /></div><span className="text-gray-500">Em rota</span></div>
-              <div className="flex items-center gap-2"><div className="flex items-center justify-center w-5 h-5 rounded bg-amber-100"><IconeTruck size={12} color="#b45309" /></div><span className="text-gray-500">Com ocorrência</span></div>
-              <div className="flex items-center gap-2"><div className="flex items-center justify-center w-5 h-5 rounded bg-green-100"><IconeTruck size={12} color="#15803d" /></div><span className="text-gray-500">Concluída</span></div>
-              <div className="flex items-center gap-2 pt-1 border-t border-gray-50"><span className="w-2 h-2 rounded-full bg-green-500 animate-pulse inline-block" /><span className="text-gray-400">GPS ao vivo ativo</span></div>
+              <div className="flex items-center gap-2">
+                <div className="flex items-center justify-center w-5 h-5 rounded bg-blue-100"><IconeTruck size={12} color="#1d4ed8" /></div>
+                <span className="text-gray-500">Em rota</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="flex items-center justify-center w-5 h-5 rounded bg-amber-100"><IconeTruck size={12} color="#b45309" /></div>
+                <span className="text-gray-500">Com ocorrência</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="flex items-center justify-center w-5 h-5 rounded bg-green-100"><IconeTruck size={12} color="#15803d" /></div>
+                <span className="text-gray-500">Concluída</span>
+              </div>
+              <div className="flex items-center gap-2 pt-1 border-t border-gray-50">
+                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse inline-block" />
+                <span className="text-gray-400">GPS ao vivo ativo</span>
+              </div>
               <p className="text-gray-300 pt-1 border-t border-gray-50">Toque no motorista para<br/>centralizar no mapa</p>
             </div>
           )}
