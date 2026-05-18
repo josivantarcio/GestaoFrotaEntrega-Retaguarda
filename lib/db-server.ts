@@ -196,6 +196,7 @@ export async function upsertDescarga(payload: {
   hora_fim?: string | null;
   motoristas_ids: number[];
   observacao?: string | null;
+  volumetria?: number | null;
   criado_em: string;
 }) {
   const { error } = await sb()
@@ -205,6 +206,7 @@ export async function upsertDescarga(payload: {
       hora_fim: payload.hora_fim ?? null,
       motoristas_ids: JSON.stringify(payload.motoristas_ids),
       observacao: payload.observacao ?? null,
+      volumetria: payload.volumetria ?? null,
     }, { onConflict: "id" });
   if (error) throw error;
 }
