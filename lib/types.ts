@@ -37,6 +37,29 @@ export interface ItemRota {
   ocorrencias: Ocorrencia[];
 }
 
+export type TipoRefeicao = "cafe_manha" | "almoco" | "jantar" | "lanche" | "outro";
+export type FormaPagamentoRefeicao = "dinheiro" | "pix" | "cartao_debito" | "cartao_credito" | "empresa" | "outro";
+
+export const LABELS_REFEICAO: Record<TipoRefeicao, string> = {
+  cafe_manha: "Café da manhã",
+  almoco: "Almoço",
+  jantar: "Jantar",
+  lanche: "Lanche",
+  outro: "Outro",
+};
+
+export interface PausaAlimentacao {
+  id: string;
+  tipo: TipoRefeicao;
+  horaInicio: string;
+  horaFim?: string;
+  valorGasto?: number;
+  formaPagamento?: FormaPagamentoRefeicao;
+  local?: string;
+  observacao?: string;
+  preRota?: boolean;
+}
+
 export interface Rota {
   id: number;
   data: string;           // "YYYY-MM-DD"
@@ -49,6 +72,8 @@ export interface Rota {
   hora_chegada: string | null;
   status: StatusRota;
   itens: ItemRota[];
+  pausas_alimentacao: PausaAlimentacao[];
+  trocas_veiculo?: unknown[];
   criado_em: string;
   atualizado_em: string;
 }

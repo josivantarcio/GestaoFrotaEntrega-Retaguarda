@@ -25,6 +25,7 @@ export async function GET(req: NextRequest) {
   const rotas = (rows ?? []).map((r: any) => ({
     ...r,
     itens: typeof r.itens === "string" ? JSON.parse(r.itens) : (r.itens ?? []),
+    pausas_alimentacao: typeof r.pausas_alimentacao === "string" ? JSON.parse(r.pausas_alimentacao) : (r.pausas_alimentacao ?? []),
   }));
 
   return NextResponse.json(rotas);

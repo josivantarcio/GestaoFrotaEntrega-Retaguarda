@@ -36,21 +36,29 @@ CREATE TABLE IF NOT EXISTS veiculos (
 );
 
 CREATE TABLE IF NOT EXISTS rotas (
-  id            BIGINT PRIMARY KEY,
-  data          DATE NOT NULL,
-  veiculo_id    BIGINT REFERENCES veiculos(id),
-  veiculo_placa TEXT NOT NULL,
-  motorista     TEXT NOT NULL,
-  km_saida      NUMERIC(10,2) NOT NULL,
-  km_chegada    NUMERIC(10,2),
-  hora_saida    TEXT NOT NULL,
-  hora_chegada  TEXT,
-  status        TEXT NOT NULL DEFAULT 'em_andamento'
-                  CHECK (status IN ('em_andamento', 'concluida')),
-  itens         JSONB NOT NULL DEFAULT '[]',
-  criado_em     TIMESTAMPTZ NOT NULL,
-  atualizado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+  id                   BIGINT PRIMARY KEY,
+  data                 DATE NOT NULL,
+  veiculo_id           BIGINT REFERENCES veiculos(id),
+  veiculo_placa        TEXT NOT NULL,
+  motorista            TEXT NOT NULL,
+  km_saida             NUMERIC(10,2) NOT NULL,
+  km_chegada           NUMERIC(10,2),
+  hora_saida           TEXT NOT NULL,
+  hora_chegada         TEXT,
+  status               TEXT NOT NULL DEFAULT 'em_andamento'
+                         CHECK (status IN ('aguardando_saida', 'em_andamento', 'concluida')),
+  itens                JSONB NOT NULL DEFAULT '[]',
+  pausas_alimentacao   JSONB NOT NULL DEFAULT '[]',
+  trocas_veiculo       JSONB NOT NULL DEFAULT '[]',
+  criado_em            TIMESTAMPTZ NOT NULL,
+  atualizado_em        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Migração: adicionar colunas se não existirem
+ALTER TABLE rotas ADD COLUMN IF NOT EXISTS pausas_alimentacao JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE rotas ADD COLUMN IF NOT EXISTS trocas_veiculo JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE rotas DROP CONSTRAINT IF EXISTS rotas_status_check;
+ALTER TABLE rotas ADD CONSTRAINT rotas_status_check CHECK (status IN ('aguardando_saida', 'em_andamento', 'concluida'));
 
 -- ── Índices ───────────────────────────────────────────────────────────
 

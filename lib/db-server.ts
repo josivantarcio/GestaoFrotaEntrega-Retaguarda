@@ -39,6 +39,8 @@ export async function upsertRota(payload: {
   hora_chegada?: string | null;
   status: string;
   itens: unknown[];
+  pausas_alimentacao?: unknown[];
+  trocas_veiculo?: unknown[];
   criado_em: string;
   atualizado_em?: string;
 }) {
@@ -48,6 +50,8 @@ export async function upsertRota(payload: {
     .upsert({
       ...payload,
       itens: JSON.stringify(payload.itens ?? []),
+      pausas_alimentacao: JSON.stringify(payload.pausas_alimentacao ?? []),
+      trocas_veiculo: JSON.stringify(payload.trocas_veiculo ?? []),
       atualizado_em: payload.atualizado_em ?? now,
     }, { onConflict: "id" })
     .select()

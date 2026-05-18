@@ -6,11 +6,11 @@ import Link from "next/link";
 import {
   BarChart2, Package, AlertTriangle, CheckCircle2, Truck,
   Download, Search, ChevronDown, ChevronUp, FileText, Users,
-  Clock, PackageOpen,
+  Clock, PackageOpen, UtensilsCrossed,
 } from "lucide-react";
 import { NavBar } from "@/components/layout/NavBar";
-import type { Rota, ItemRota, Ocorrencia, Jornada, Descarga } from "@/lib/types";
-import { LABELS_OCORRENCIA } from "@/lib/types";
+import type { Rota, ItemRota, Ocorrencia, Jornada, Descarga, PausaAlimentacao } from "@/lib/types";
+import { LABELS_OCORRENCIA, LABELS_REFEICAO } from "@/lib/types";
 
 // ── Helpers ──────────────────────────────────────────────────
 function hoje() {
@@ -49,7 +49,7 @@ function formatarDuracao(min: number): string {
   return h > 0 ? `${h}h ${m < 10 ? "0" : ""}${m}min` : `${m}min`;
 }
 
-type Aba = "rotas" | "ocorrencias" | "jornadas" | "exportar";
+type Aba = "rotas" | "ocorrencias" | "refeicoes" | "jornadas" | "exportar";
 
 // ── CSV ───────────────────────────────────────────────────────
 function gerarCSVRotas(rotas: Rota[]): string {
@@ -248,6 +248,12 @@ function AbaOcorrencias({ rotas }: { rotas: Rota[] }) {
     return Object.entries(mapa).sort((a, b) => b[1] - a[1]);
   }, [todas]);
 
+  const porMotorista = useMemo(() => {
+    const mapa: Record<string, number> = {};
+    for (const oc of todas) mapa[oc.motorista] = (mapa[oc.motorista] ?? 0) + oc.quantidade;
+    return Object.entries(mapa).sort((a, b) => b[1] - a[1]);
+  }, [todas]);
+
   if (todas.length === 0) {
     return (
       <div className="text-center py-16">
@@ -259,6 +265,7 @@ function AbaOcorrencias({ rotas }: { rotas: Rota[] }) {
 
   return (
     <div className="space-y-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
         <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Ranking por tipo</p>
         <div className="space-y-2">
@@ -275,6 +282,25 @@ function AbaOcorrencias({ rotas }: { rotas: Rota[] }) {
             );
           })}
         </div>
+      </div>
+
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+        <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Ranking por motorista</p>
+        <div className="space-y-2">
+          {porMotorista.map(([motorista, qtd]) => {
+            const max = porMotorista[0][1];
+            return (
+              <div key={motorista} className="flex items-center gap-3">
+                <span className="text-xs text-gray-600 w-36 flex-shrink-0 truncate">{motorista}</span>
+                <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                  <div className="h-full bg-red-400 rounded-full" style={{ width: `${(qtd / max) * 100}%` }} />
+                </div>
+                <span className="text-xs font-bold text-gray-700 w-6 text-right">{qtd}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
       </div>
 
       <div className="space-y-2">
@@ -296,6 +322,119 @@ function AbaOcorrencias({ rotas }: { rotas: Rota[] }) {
             </div>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Aba Refeições ────────────────────────────────────────────
+function AbaRefeicoes({ rotas }: { rotas: Rota[] }) {
+  type PausaComContexto = PausaAlimentacao & { data: string; motorista: string; placa: string };
+
+  const todas = useMemo<PausaComContexto[]>(() => {
+    const lista: PausaComContexto[] = [];
+    for (const r of rotas) {
+      for (const p of r.pausas_alimentacao ?? []) {
+        lista.push({ ...p, data: r.data, motorista: r.motorista, placa: r.veiculo_placa });
+      }
+    }
+    return lista.sort((a, b) => b.data.localeCompare(a.data));
+  }, [rotas]);
+
+  const porMotorista = useMemo(() => {
+    const mapa: Record<string, { qtd: number; total: number; tipos: Record<string, number> }> = {};
+    for (const p of todas) {
+      if (!mapa[p.motorista]) mapa[p.motorista] = { qtd: 0, total: 0, tipos: {} };
+      mapa[p.motorista].qtd++;
+      mapa[p.motorista].total += p.valorGasto ?? 0;
+      mapa[p.motorista].tipos[p.tipo] = (mapa[p.motorista].tipos[p.tipo] ?? 0) + 1;
+    }
+    return Object.entries(mapa).sort((a, b) => b[1].total - a[1].total);
+  }, [todas]);
+
+  if (todas.length === 0) {
+    return (
+      <div className="text-center py-16">
+        <UtensilsCrossed size={40} className="text-gray-200 mx-auto mb-3" />
+        <p className="text-gray-400 font-medium">Nenhuma refeição registrada no período</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Resumo por motorista */}
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+        <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Resumo por motorista</p>
+        <div className="space-y-3">
+          {porMotorista.map(([motorista, info]) => (
+            <div key={motorista} className="flex items-start gap-3 py-2 border-b border-gray-50 last:border-0">
+              <div className="bg-orange-50 rounded-lg p-1.5 flex-shrink-0">
+                <UtensilsCrossed size={14} className="text-orange-500" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-gray-800">{motorista}</p>
+                <div className="flex flex-wrap gap-2 mt-1">
+                  {Object.entries(info.tipos).map(([tipo, qtd]) => (
+                    <span key={tipo} className="text-xs bg-orange-50 text-orange-700 px-2 py-0.5 rounded-full">
+                      {LABELS_REFEICAO[tipo as keyof typeof LABELS_REFEICAO] ?? tipo}: {qtd}×
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <div className="text-right flex-shrink-0">
+                <p className="text-sm font-bold text-gray-700">{info.qtd} pausa{info.qtd !== 1 ? "s" : ""}</p>
+                {info.total > 0 && (
+                  <p className="text-xs text-gray-400">R$ {info.total.toFixed(2).replace(".", ",")}</p>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Lista detalhada */}
+      <div className="space-y-2">
+        {todas.map((p, idx) => {
+          const durMin = p.horaFim
+            ? (() => {
+                const [hi, mi] = p.horaInicio.split(":").map(Number);
+                const [hf, mf] = p.horaFim.split(":").map(Number);
+                return hf * 60 + mf - (hi * 60 + mi);
+              })()
+            : null;
+          return (
+            <div key={idx} className="bg-white rounded-xl border border-orange-100 shadow-sm px-4 py-3 flex items-start gap-3">
+              <UtensilsCrossed size={14} className="text-orange-400 mt-0.5 flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm font-semibold text-gray-800">
+                    {LABELS_REFEICAO[p.tipo as keyof typeof LABELS_REFEICAO] ?? p.tipo}
+                  </span>
+                  {p.preRota && (
+                    <span className="text-xs bg-yellow-100 text-yellow-700 font-semibold px-2 py-0.5 rounded-full">pré-rota</span>
+                  )}
+                  {!p.horaFim && (
+                    <span className="text-xs bg-orange-100 text-orange-700 font-semibold px-2 py-0.5 rounded-full">em aberto</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-400 flex-wrap">
+                  <span>{dataBR(p.data)}</span>
+                  <span>{p.motorista}</span>
+                  <span>{p.horaInicio}{p.horaFim ? ` → ${p.horaFim}` : ""}</span>
+                  {durMin !== null && durMin > 0 && (
+                    <span className="font-semibold text-gray-500">{formatarDuracao(durMin)}</span>
+                  )}
+                  {p.valorGasto != null && p.valorGasto > 0 && (
+                    <span className="font-semibold text-gray-600">R$ {p.valorGasto.toFixed(2).replace(".", ",")}</span>
+                  )}
+                  {p.local && <span className="italic">"{p.local}"</span>}
+                </div>
+                {p.observacao && <p className="text-xs text-gray-500 mt-1 italic">"{p.observacao}"</p>}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -555,10 +694,12 @@ export default function RelatoriosPage() {
   const totalOcs = rotas.reduce((s, r) => s + r.itens.reduce((si, i) => si + (i.ocorrencias?.length ?? 0), 0), 0);
   const totalKm = rotas.reduce((s, r) => s + kmTotal(r), 0);
   const taxaEntrega = totalVolumes > 0 ? Math.round((totalEntregues / totalVolumes) * 100) : 0;
+  const totalRefeicoes = rotas.reduce((s, r) => s + (r.pausas_alimentacao?.length ?? 0), 0);
 
   const ABAS: { id: Aba; label: string; count?: number }[] = [
     { id: "rotas", label: `Rotas (${totalRotas})` },
     { id: "ocorrencias", label: `Ocorrências (${totalOcs})` },
+    { id: "refeicoes", label: `Refeições (${totalRefeicoes})` },
     { id: "jornadas", label: `Jornadas & Descargas (${jornadas.length + descargas.length})` },
     { id: "exportar", label: "Exportar" },
   ];
@@ -646,6 +787,7 @@ export default function RelatoriosPage() {
                 )
               )}
               {aba === "ocorrencias" && <AbaOcorrencias rotas={rotas} />}
+              {aba === "refeicoes" && <AbaRefeicoes rotas={rotas} />}
               {aba === "jornadas" && <AbaJornadas jornadas={jornadas} descargas={descargas} />}
               {aba === "exportar" && <AbaExportar rotas={rotas} jornadas={jornadas} descargas={descargas} inicio={inicio} fim={fim} />}
             </div>

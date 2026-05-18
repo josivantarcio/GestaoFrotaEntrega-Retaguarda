@@ -40,6 +40,7 @@ export function useRotasRealtime({ dataFiltro, onEvento }: Options) {
           mapa.set(r.id, {
             ...r,
             itens: typeof r.itens === "string" ? JSON.parse(r.itens) : (r.itens ?? []),
+            pausas_alimentacao: typeof r.pausas_alimentacao === "string" ? JSON.parse(r.pausas_alimentacao) : (r.pausas_alimentacao ?? []),
           });
         });
         rotasRef.current = mapa;
@@ -67,6 +68,7 @@ export function useRotasRealtime({ dataFiltro, onEvento }: Options) {
           const rotaNova: Rota = {
             ...nova,
             itens: typeof nova.itens === "string" ? JSON.parse(nova.itens) : (nova.itens ?? []),
+            pausas_alimentacao: typeof nova.pausas_alimentacao === "string" ? JSON.parse(nova.pausas_alimentacao) : (nova.pausas_alimentacao ?? []),
           };
 
           const antiga = rotasRef.current.get(rotaNova.id);
