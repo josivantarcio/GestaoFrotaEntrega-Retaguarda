@@ -44,7 +44,12 @@ export function RotaCard({ rota, concluida = false }: Props) {
               )}
             </div>
             <div className="min-w-0">
-              <p className="font-bold text-gray-900 text-base truncate">{rota.motorista}</p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="font-bold text-gray-900 text-base truncate">{rota.motorista}</p>
+                {rota.status === "aguardando_saida" && (
+                  <span className="text-xs bg-yellow-100 text-yellow-700 font-semibold px-2 py-0.5 rounded-full flex-shrink-0">Aguardando saída</span>
+                )}
+              </div>
               <p className="text-sm text-gray-500">{rota.veiculo_placa}</p>
             </div>
           </div>

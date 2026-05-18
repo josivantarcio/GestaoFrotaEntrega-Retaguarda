@@ -32,7 +32,7 @@ export default function DashboardPage() {
 
   const { jornadas, descargas } = useJornadasDescargasRealtime(dataHoje);
 
-  const emAndamento = useMemo(() => rotas.filter((r) => r.status === "em_andamento"), [rotas]);
+  const emAndamento = useMemo(() => rotas.filter((r) => r.status === "em_andamento" || r.status === "aguardando_saida"), [rotas]);
   const concluidas = useMemo(() => rotas.filter((r) => r.status === "concluida"), [rotas]);
 
   const totalVolumes = rotas.reduce((s, r) => s + r.itens.reduce((si, i) => si + i.volumesSaida, 0), 0);
@@ -52,7 +52,7 @@ export default function DashboardPage() {
       <div className="px-5 py-4 grid grid-cols-2 md:grid-cols-4 gap-3">
         <KpiCard
           icone={<Truck size={20} className="text-[#0d47a1]" />}
-          titulo="Em Andamento"
+          titulo="Rotas Ativas"
           valor={emAndamento.length}
           sub={`${concluidas.length} concluída${concluidas.length !== 1 ? "s" : ""}`}
           destaque={emAndamento.length > 0}
@@ -98,7 +98,7 @@ export default function DashboardPage() {
             {emAndamento.length > 0 && (
               <>
                 <h2 className="text-xs font-bold text-gray-400 uppercase tracking-widest pt-2">
-                  Em andamento ({emAndamento.length})
+                  Ativas ({emAndamento.length})
                 </h2>
                 {emAndamento.map((r) => (
                   <RotaCard key={r.id} rota={r} />
